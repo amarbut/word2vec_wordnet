@@ -66,7 +66,7 @@ class DataReader:
                         if self.token_count % 1000000 == 0:
                             print(str(int(self.token_count / 1000000)), "M tokens ingested.")
 
-        wid = 0
+        wid = int(0)
         for w, c in word_frequency.items():
             self.word2id[w] = wid
             self.id2word[wid] = w
@@ -137,7 +137,7 @@ class DataReader:
     def init_wn_negative_probs(self):
         
         #use adjusted unigram sampling at synset level--raise the word frequencies to the 3/4 power to make less frequent words appear more often
-        pow_freq = {self.wn_synset_frequency[ss]**0.75 for ss in self.wn_synset_frequency}
+        pow_freq = {ss:self.wn_synset_frequency[ss]**0.75 for ss in self.wn_synset_frequency}
         ss_pow = sum(list(pow_freq.values()))
         count_ratio = {k:np.round((v/ss_pow)*DataReader.NEGATIVE_TABLE_SIZE) for k,v in pow_freq.items()}
         
@@ -182,7 +182,7 @@ class Word2VecWordnetDataset:
         self.wn_positive_sample = wn_positive_sample
 
     def __len__(self):
-        return self.data.sentences_count
+        return self.data.sentence_count
     
     #function used to retrieve samples for each line (target (or wordnet syn), [context], [negative context], [wordnet syn]) 
     def __getitem__(self, idx):
@@ -194,21 +194,23 @@ class Word2VecWordnetDataset:
                 line = self.input_file.readline()
 
             if len(line) > 1:
-                words = line.split()
+                words = line.strip().split()
+                print(words)
 
                 if len(words) > 1:
                     #collect word ids for sentence, ignoring words w/ subsample probability
-                    word_ids = [self.data.word2id[w] for w in words if
-                                w in self.data.word2id and np.random.rand() > self.data.subsample_probs[self.data.word2id[w]]]
+                    word_ids = [self.data.word2id[w] for w in words if w in self.data.word2id]
                     
                     #context window ranges from 1 to window size
                     boundary = np.random.randint(1, (self.window_size-1)/2)
+                    #boundary = int((self.window_size-1)/2)
                     
                     #collect list of all target/positive context pairs
-                    pos_pairs = [(u,word_ids[max(i - boundary, 0):i + boundary]) for i, u in enumerate(word_ids)]
+                    #PAD LIST SO THAT ALL THE SAME LENGTH WHEN CONVERT TO TENSOR
+                    pos_pairs = [(u,word_ids[int(max(i - boundary, 0)):int(i + boundary)]) for i, u in enumerate(word_ids) if np.random.rand() > self.data.subsample_probs[int(u)]]
                     
                     #do vanilla word2vec neg sampling without wordnet input
-                    if not self.wn_negative_sample and not self.wn_positive_sample and not self.wn_centroid:
+                    if not self.wn_negative_sample and not self.wn_positive_sample:
                         
                         negs = [self.data.get_negatives(pos,5, boundary*2) for pos in pos_pairs]
                         wn_pos = [[] for _ in range(len(negs))]
@@ -463,8 +465,8 @@ class WordnetFineTuning(nn.Module):
 
 class Word2VecWordnetTrainer:
     def __init__(self, train_dir, input_file_name, model_dir, 
-                 emb_dimension, batch_size, epochs, initial_lr, 
-                 window_size, wn_negative_sample = False, wn_positive_sample = False, wn_depth = 0,
+                 emb_dimension = 100, batch_size = 32, epochs = 3, initial_lr = 0.001, 
+                 window_size = 5, wn_negative_sample = False, wn_positive_sample = False, wn_depth = 0,
                  mismatch_weight=1, w2v_loss_weight=1, wn_loss_weight=1, margin = 1,
                  wn_fine_tune = False, ft_margin_weight = 1, ft_num_negs = 4):
         
@@ -473,7 +475,7 @@ class Word2VecWordnetTrainer:
         self.data = DataReader(train_dir, input_file_name, self.wn, self.wn_depth)
         dataset = Word2VecWordnetDataset(self.data, window_size, wn_negative_sample, wn_positive_sample)
         self.dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = False, num_workers = 0,
-                                     collate_fn = dataset.collate)
+                                     collate_fn = dataset.collate_fn)
         
         self.wn_fine_tune = wn_fine_tune
         self.ft_margin_weight = ft_margin_weight
@@ -505,7 +507,7 @@ class Word2VecWordnetTrainer:
             
             print('\nStarting Epoch', (epoch+1))
             optimizer = optim.SparseAdam(self.model.parameters(), lr = self.initial_lr)
-            scheduler = optim.lr_scheduler.CosineAnnealinLR(optimizer, len(self.dataloader))
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(self.dataloader))
             
             for i, batch in enumerate(self.dataloader):
                 if len(batch[0])>1:
@@ -532,7 +534,7 @@ class Word2VecWordnetTrainer:
             ft_model = WordnetFineTuning(self.model, self.data.wn_id2synset, self.data.wn_synset2word, self.ft_num_negs, self.ft_margin_weight)
             
             ft_optimizer = optim.SparseAdam(ft_model.parameters(), lr = self.initial_lr)
-            ft_scheduler = optim.lr_scheduler.CosineAnnealinLR(optimizer, len(ft_dataloader))
+            ft_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(ft_dataloader))
             
             #more than one epoch?
             for i, batch in enumerate(ft_dataloader):
@@ -552,5 +554,30 @@ class Word2VecWordnetTrainer:
             
         else:
             self.model.save_embeddings(self.data.id2word, self.model_dir)
-                    
+
+#--------------------------------------------------------------------------------------------------------------------------
+            
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--train_dir',  help = 'location of training data', required = True)
+    parser.add_argument('--input_file_name', help = 'text file for training data', required = True)
+    parser.add_argument('--model_dir', help = 'file location for trained embeddings to be saved', required = True)
+    parser.add_argument('--emb_dimension', help = 'dimension of trained embedding', type = int, default = 100, required = False)
+    parser.add_argument('--batch_size', type = int, default = 32, required = False)
+    parser.add_argument('--epochs',  help = 'number of full runs through data set', type = int, default = 3, required = False)
+    parser.add_argument('--initial_lr', help = 'starting learning rate, to be updated by sparse_adam optimizer', type = float, default = 0.001, required = False)
+    parser.add_argument('--window_size', help = 'training window size', type = int, default = 5, required = False)
+    parser.add_argument('--wn_negative_sample', help = 'integrate wn knowledge in w2v loss function with additional contrastive loss', type = bool, default = False, required = False)
+    parser.add_argument('--wn_positive sample', help = 'integrate wn knowledge in w2v loss by extending with target word-synset member replacement', type = bool, default = False, required = False)
+    parser.add_argument('--wn_depth', help = 'how many levels of hyponyms to include in a wn synset group, between 0 (synset members only) and 2', type = int, default = 0, required = False)
+    parser.add_argument('--mismatch_weight', help = 'if wn_negative_sample = True: weight for wn similar words in w2v loss function, and w2v positive context words in wn loss function', type = float, default = 1.0, required = False)
+    parser.add_argument('--w2v_loss_weight', help = 'if wn_negative_sample = True: weight for w2v loss function', type = float, default = 1.0, required = False)
+    parser.add_argument('--wn_loss_weight', help = 'if wn_negative_sample = True: weight for wn loss function', type = float, default = 1.0, required = False)
+    parser.add_argument('--margin', help = 'if wn_negative_sample = True: wn contrastive loss margin', type = float, default = 1.0, required = False)
+    parser.add_argument('--wn_fine_tune', help = 'integrate wn knowledge with second model using w2v-trained embeddings; uses contrastive loss to move synset group centroids', type = bool, default = False, required = False)
+    parser.add_argument('--ft_margin_weight', help = 'if wn_fine_tune = True: weight for calculating contrastive loss margins based on wn synset path distance', type = float, default = 1.0, required = False)
+    parser.add_argument('--ft_num_negs', help = 'if wn_fine_tune = True: number of negative synset groups to be sampled', type = int, default = 4, required = False)
+    args = vars(parser.parse_args())
+    w2v_wn = Word2VecWordnetTrainer(**args)
+    w2v_wn.train()           
             
