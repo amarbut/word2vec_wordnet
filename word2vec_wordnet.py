@@ -461,6 +461,10 @@ class WordnetFineTuning(nn.Module):
         loss = syn_pos_loss + neg_loss
         return(torch.mean(loss))
         
+    # TODO: for embedding projector, join the embeddings digits
+    # with tabs, and save the names of the embeddings to a separate 
+    # file.
+
     def save_embeddings(self, id2word, file_name):
         embeddings = self.embeddings.weight.cpu().data.numpy()
         with open(file_name, 'w') as f:
@@ -479,7 +483,7 @@ class Word2VecWordnetTrainer:
         
         self.wn = (wn_negative_sample or wn_positive_sample or wn_fine_tune)
         self.wn_depth = wn_depth
-        print("Buidling Dataset")
+        print("Building Dataset")
         self.data = DataReader(train_dir, input_file_name, self.wn, self.wn_depth)
         dataset = Word2VecWordnetDataset(self.data, window_size, wn_negative_sample, wn_positive_sample)
         self.dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = False, num_workers = 0,
@@ -533,19 +537,25 @@ class Word2VecWordnetTrainer:
                     
                     if i > 0 and i % 500 == 0:
                         print(i/len(self.dataloader),"% Loss:", loss.item())
+
+            # TODO: save model embeddings after word2vec training
                     
                     
         if self.wn_fine_tune:
+
             ft_dataset = WordnetFineTuningDataset(self.data, self.ft_num_negs)
             ft_batch_size = len(self.data.synset2id)/300
             ft_dataloader = DataLoader(ft_dataset, batch_size = ft_batch_size, shuffle = False, num_workers = 0)
     
             ft_model = WordnetFineTuning(self.model, self.data.wn_id2synset, self.data.wn_synset2word, self.ft_num_negs, self.ft_margin_weight)
             
+            # TODO: turn down initial learning rate for finetuning
             ft_optimizer = optim.SparseAdam(ft_model.parameters(), lr = self.initial_lr)
             ft_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(ft_dataloader))
             
-            #more than one epoch?
+            # more than one epoch?
+            # TODO: yes, let's start with 5
+
             for i, batch in enumerate(ft_dataloader):
                 targets = batch['syn']
                 negs = batch['negs']
@@ -563,6 +573,8 @@ class Word2VecWordnetTrainer:
             
         else:
             self.model.save_embeddings(self.data.id2word, self.model_file)
+
+        # TODO: Save model context and target weights so we can use the model later
 
 #--------------------------------------------------------------------------------------------------------------------------
             
