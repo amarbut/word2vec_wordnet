@@ -47,7 +47,8 @@ class DataReader:
         self.read_words()
         self.init_negative_probs()
         self.init_subsample_probs()
-        self.init_wn_negative_probs()
+        if self.wn == True:
+            self.init_wn_negative_probs()
         
 
     #get term counts over entire dataset    
@@ -66,7 +67,12 @@ class DataReader:
                         if self.token_count % 1000000 == 0:
                             print(str(int(self.token_count / 1000000)), "M tokens ingested.")
 
-        wid = int(0)
+        
+        #start word ids at 1 so that 0 can be used for tensor padding
+        wid = int(1)
+        self.id2word[0] = ''
+        self.word_frequency[0] = 0
+        
         for w, c in word_frequency.items():
             self.word2id[w] = wid
             self.id2word[wid] = w
@@ -111,13 +117,14 @@ class DataReader:
 
     #calculate subsample probability according to 2nd Word2Vec paper equation
     def init_subsample_probs(self):
+        print("Initiating Subsample Probabilities")
         t = 0.00001
-        f = np.array(list(self.word_frequency.values())) / self.token_count
-        self.subsample_probs = 1-np.sqrt(t / f)       
+        f = np.array(list(self.word_frequency.values()))/ self.token_count
+        self.subsample_probs = np.concatenate((np.array([0]),1-np.sqrt(t / f[1:])))     
 
     #create array of words to be used in negative samples of size NEGATIVE_TABLE_SIZE; sample with adjusted unigram method
     def init_negative_probs(self):
-        
+        print("Initiating Negative Sample Probabilities")
         #use adjusted unigram sampling--raise the word frequencies to the 3/4 power to make less frequent words appear more often
         pow_frequency = np.array(list(self.word_frequency.values())) ** 0.75
         words_pow = sum(pow_frequency)
@@ -135,7 +142,7 @@ class DataReader:
 
     #create array of words to be used in negative samples of size NEGATIVE_TABLE_SIZE; sample with adjusted unigram method
     def init_wn_negative_probs(self):
-        
+        print("Initiative Wordnet Negative Sample Probabilities")
         #use adjusted unigram sampling at synset level--raise the word frequencies to the 3/4 power to make less frequent words appear more often
         pow_freq = {ss:self.wn_synset_frequency[ss]**0.75 for ss in self.wn_synset_frequency}
         ss_pow = sum(list(pow_freq.values()))
@@ -195,7 +202,6 @@ class Word2VecWordnetDataset:
 
             if len(line) > 1:
                 words = line.strip().split()
-                print(words)
 
                 if len(words) > 1:
                     #collect word ids for sentence, ignoring words w/ subsample probability
@@ -208,6 +214,7 @@ class Word2VecWordnetDataset:
                     #collect list of all target/positive context pairs
                     #PAD LIST SO THAT ALL THE SAME LENGTH WHEN CONVERT TO TENSOR
                     pos_pairs = [(u,word_ids[int(max(i - boundary, 0)):int(i + boundary)]) for i, u in enumerate(word_ids) if np.random.rand() > self.data.subsample_probs[int(u)]]
+                    pos_pairs = [(u,v+([0]*((boundary*2)-len(v)))) for u,v in pos_pairs]
                     
                     #do vanilla word2vec neg sampling without wordnet input
                     if not self.wn_negative_sample and not self.wn_positive_sample:
@@ -294,8 +301,8 @@ class SkipGramWordnetModel(nn.Module):
         self.id2word = id2word
         
         #initialize target and context embeddings with vocab size and embedding dimension
-        self.u_embeddings = nn.Embedding(vocab_size, emb_dimension, sparse=True)
-        self.v_embeddings = nn.Embedding(vocab_size, emb_dimension, sparse=True)
+        self.u_embeddings = nn.Embedding(vocab_size, emb_dimension, sparse=True, padding_idx = 0)
+        self.v_embeddings = nn.Embedding(vocab_size, emb_dimension, sparse=True, padding_idx = 0)
         
         initrange = 1.0 / self.emb_dimension
         #initialize target embeddings with random nums between -/+ initrange
@@ -391,7 +398,7 @@ class SkipGramWordnetModel(nn.Module):
         
     
         #return average word2vec loss
-        return w2v_loss
+        return torch.mean(w2v_loss)
     
     def save_embeddings(self, id2word, file_name):
         embeddings = self.u_embeddings.weight.cpu().data.numpy()
@@ -472,6 +479,7 @@ class Word2VecWordnetTrainer:
         
         self.wn = (wn_negative_sample or wn_positive_sample or wn_fine_tune)
         self.wn_depth = wn_depth
+        print("Buidling Dataset")
         self.data = DataReader(train_dir, input_file_name, self.wn, self.wn_depth)
         dataset = Word2VecWordnetDataset(self.data, window_size, wn_negative_sample, wn_positive_sample)
         self.dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = False, num_workers = 0,
@@ -481,8 +489,8 @@ class Word2VecWordnetTrainer:
         self.ft_margin_weight = ft_margin_weight
         self.ft_num_negs = ft_num_negs
                 
-        self.model_dir = model_dir
-        self.vocab_size = len(self.data.word2id)
+        self.model_file = model_file
+        self.vocab_size = len(self.data.id2word)
         self.emb_dimension = emb_dimension
         self.batch_size = batch_size
         self.epochs = epochs
@@ -500,6 +508,7 @@ class Word2VecWordnetTrainer:
         self.device = torch.device("cuda" if self.use_cuda else "cpu")
         if self.use_cuda:
             self.model.cuda()
+            
             
     def train(self):
         
@@ -550,10 +559,10 @@ class Word2VecWordnetTrainer:
                 if i > 0 and i % 500 == 0:
                     print(i/len(ft_dataloader),"% Loss:", loss.item())
                     
-            ft_model.save_embeddings(self.data.id2word, self.model_dir)
+            ft_model.save_embeddings(self.data.id2word, self.model_file)
             
         else:
-            self.model.save_embeddings(self.data.id2word, self.model_dir)
+            self.model.save_embeddings(self.data.id2word, self.model_file)
 
 #--------------------------------------------------------------------------------------------------------------------------
             
@@ -561,7 +570,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--train_dir',  help = 'location of training data', required = True)
     parser.add_argument('--input_file_name', help = 'text file for training data', required = True)
-    parser.add_argument('--model_dir', help = 'file location for trained embeddings to be saved', required = True)
+    parser.add_argument('--model_file', help = 'file name and location for trained embeddings to be saved', required = True)
     parser.add_argument('--emb_dimension', help = 'dimension of trained embedding', type = int, default = 100, required = False)
     parser.add_argument('--batch_size', type = int, default = 32, required = False)
     parser.add_argument('--epochs',  help = 'number of full runs through data set', type = int, default = 3, required = False)
