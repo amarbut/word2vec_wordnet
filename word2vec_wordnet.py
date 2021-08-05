@@ -476,7 +476,7 @@ class WordnetFineTuning(nn.Module):
 #--------------------------------------------------------------------------------------------------------------------------------                    
 
 class Word2VecWordnetTrainer:
-    def __init__(self, train_dir, input_file_name, model_dir, 
+    def __init__(self, train_dir, input_file_name, model_file, 
                  emb_dimension = 100, batch_size = 32, epochs = 3, initial_lr = 0.001, 
                  window_size = 5, wn_negative_sample = False, wn_positive_sample = False, wn_depth = 0,
                  mismatch_weight=1, w2v_loss_weight=1, wn_loss_weight=1, margin = 1,
