@@ -73,6 +73,7 @@ class DataReader:
         self.id2word[0] = ''
         self.word_frequency[0] = 0
         
+        #TODO: add in frequency threshold ~100 (standard per Katy)
         for w, c in word_frequency.items():
             self.word2id[w] = wid
             self.id2word[wid] = w
