@@ -590,7 +590,7 @@ if __name__ == '__main__':
     parser.add_argument('--initial_lr', help = 'starting learning rate, to be updated by sparse_adam optimizer', type = float, default = 0.001, required = False)
     parser.add_argument('--window_size', help = 'training window size', type = int, default = 5, required = False)
     parser.add_argument('--wn_negative_sample', help = 'integrate wn knowledge in w2v loss function with additional contrastive loss', type = bool, default = False, required = False)
-    parser.add_argument('--wn_positive sample', help = 'integrate wn knowledge in w2v loss by extending with target word-synset member replacement', type = bool, default = False, required = False)
+    parser.add_argument('--wn_positive_sample', help = 'integrate wn knowledge in w2v loss by extending with target word-synset member replacement', type = bool, default = False, required = False)
     parser.add_argument('--wn_depth', help = 'how many levels of hyponyms to include in a wn synset group, between 0 (synset members only) and 2', type = int, default = 0, required = False)
     parser.add_argument('--mismatch_weight', help = 'if wn_negative_sample = True: weight for wn similar words in w2v loss function, and w2v positive context words in wn loss function', type = float, default = 1.0, required = False)
     parser.add_argument('--w2v_loss_weight', help = 'if wn_negative_sample = True: weight for w2v loss function', type = float, default = 1.0, required = False)
