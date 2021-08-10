@@ -537,7 +537,7 @@ class Word2VecWordnetTrainer:
                     loss.backward()
                     optimizer.step()
                     
-                    if i > 0 and i % 500 == 0:
+                    if i > 0 and i % 5000 == 0:
                         print(i/len(self.dataloader),"% Loss:", loss.item())
 
             # TODO: save model embeddings after word2vec training
@@ -586,7 +586,7 @@ if __name__ == '__main__':
     parser.add_argument('--input_file_name', help = 'text file for training data', required = True)
     parser.add_argument('--model_file', help = 'file name and location for trained embeddings to be saved', required = True)
     parser.add_argument('--emb_dimension', help = 'dimension of trained embedding', type = int, default = 100, required = False)
-    parser.add_argument('--batch_size', type = int, default = 32, required = False)
+    parser.add_argument('--batch_size', type = int, default = 1024, required = False)
     parser.add_argument('--epochs',  help = 'number of full runs through data set', type = int, default = 3, required = False)
     parser.add_argument('--initial_lr', help = 'starting learning rate, to be updated by sparse_adam optimizer', type = float, default = 0.001, required = False)
     parser.add_argument('--window_size', help = 'training window size', type = int, default = 5, required = False)
