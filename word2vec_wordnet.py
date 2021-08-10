@@ -511,12 +511,13 @@ class Word2VecWordnetTrainer:
         
         self.use_cuda = torch.cuda.is_available()
         self.device = torch.device("cuda" if self.use_cuda else "cpu")
+        print("cuda available:", self.use_cuda)
         if self.use_cuda:
             self.model.cuda()
             
             
     def train(self):
-        
+        print("training on cuda: ", self.use_cuda)
         for epoch in range(self.epochs):
             
             print('\nStarting Epoch', (epoch+1))
