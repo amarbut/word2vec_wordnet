@@ -15,7 +15,7 @@ def make_emb_dict(emb_file, word_file):
     with open(emb_file, "r") as ef:
         with open(word_file, "r") as wf:
             for emb in ef.readlines():
-                w = word_file.readline().strip()
+                w = wf.readline().strip()
                 emb_split = emb.strip().split("\t")
                 emb_dict[w] = emb_split
     return emb_dict
