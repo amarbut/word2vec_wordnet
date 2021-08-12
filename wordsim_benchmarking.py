@@ -63,6 +63,7 @@ def benchmark_embeddings(emb_file, word_file, wordsim_file, wordsim_task):
     
     emb_dict = make_emb_dict(emb_file, word_file)
     sim_dict = make_sim_dict(wordsim_file, wordsim_task)
+    print(compare_similarity(emb_dict, sim_dict))
     return compare_similarity(emb_dict, sim_dict)
     
 
