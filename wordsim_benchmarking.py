@@ -22,7 +22,7 @@ def make_emb_dict(emb_file, word_file):
                 
 def make_sim_dict(wordsim_file, wordsim_task):
     sim_dict = dict()
-    if wordsim_task = 'ws353':
+    if wordsim_task == 'ws353':
         with open(wordsimfile, 'r') as f:
             for i,line in enumerate(f.readlines()):
                 if i <11:
@@ -30,7 +30,7 @@ def make_sim_dict(wordsim_file, wordsim_task):
                 else:
                     cl, w1, w2, rank = line.lower().split()
                     sim_dict[(w1,w2)] = rank
-    elif wordsim_task = 'simlex':
+    elif wordsim_task == 'simlex':
         with open (wordsim_file, 'r') as f:
             for i,line in enumerate(f.readlines()):
                 if i<2:
