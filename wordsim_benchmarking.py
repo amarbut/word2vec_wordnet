@@ -23,7 +23,7 @@ def make_emb_dict(emb_file, word_file):
 def make_sim_dict(wordsim_file, wordsim_task):
     sim_dict = dict()
     if wordsim_task == 'ws353':
-        with open(wordsimfile, 'r') as f:
+        with open(wordsim_file, 'r') as f:
             for i,line in enumerate(f.readlines()):
                 if i <11:
                     continue
