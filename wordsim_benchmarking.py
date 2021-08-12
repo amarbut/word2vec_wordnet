@@ -16,7 +16,7 @@ def make_emb_dict(emb_file, word_file):
         with open(word_file, "r") as wf:
             for emb in ef.readlines():
                 w = wf.readline().strip()
-                emb_split = emb.strip().split("\t")
+                emb_split = [np.float(i) for i in emb.strip().split("\t")]
                 emb_dict[w] = emb_split
     return emb_dict
                 
@@ -29,7 +29,7 @@ def make_sim_dict(wordsim_file, wordsim_task):
                     continue
                 else:
                     cl, w1, w2, rank = line.lower().split()
-                    sim_dict[(w1,w2)] = rank
+                    sim_dict[(w1,w2)] = np.float(rank)
     elif wordsim_task == 'simlex':
         with open (wordsim_file, 'r') as f:
             for i,line in enumerate(f.readlines()):
@@ -40,7 +40,7 @@ def make_sim_dict(wordsim_file, wordsim_task):
                     w1 = row[0]
                     w2 = row[1]
                     score = row[3]
-                    sim_dict[(w1,w2)] = score
+                    sim_dict[(w1,w2)] = np.float(score)
     else:
         raise Exception("Similarity task not supported")
         
