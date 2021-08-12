@@ -55,7 +55,7 @@ def compare_similarity(emb_dict, sim_dict):
             A = emb_dict[w1]
             B = emb_dict[w2]
             cos_sim.append(np.dot(A,B)/(np.linalg.norm(A)*np.linalg.norm(B)))
-            gold_sim.append(simdict[(w1,w2)])
+            gold_sim.append(sim_dict[(w1,w2)])
         
     return stats.spearmanr(cos_sim, gold_sim)
 
