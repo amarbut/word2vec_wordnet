@@ -93,15 +93,15 @@ class DataReader:
                     s = synset.name()
                     #skip synset if already added
                     if not s in self.wn_synset2id:
-                        syns = [self.word2id[w] for w in synset.lemma_names() if w in self.word2id]
+                        syns = [self.word2id[w.lower()] for w in synset.lemma_names() if w.lower() in self.word2id]
                         
                         #add 1st level of hyponyms
                         if self.wn_depth > 0: 
-                            syns.extend([self.word2id[w] for h in s.hyponyms() for w in h.lemma_names() if w in self.word2id])
+                            syns.extend([self.word2id[w.lower()] for h in s.hyponyms() for w in h.lemma_names() if w.lower() in self.word2id])
                         
                         #add 2nd level of hyponyms
                         if self.wn_depth > 1:
-                            syns.extend([self.word2id[w] for h in s.hyponyms() for hh in h.hyponyms() for w in hh.lemma_names if w in self.word2id])
+                            syns.extend([self.word2id[w.lower()] for h in s.hyponyms() for hh in h.hyponyms() for w in hh.lemma_names if w.lower() in self.word2id])
                         
                         self.wn_synset2id[s] = sid
                         self.wn_synset2word[sid] = set(syns)
@@ -143,7 +143,7 @@ class DataReader:
 
     #create array of words to be used in negative samples of size NEGATIVE_TABLE_SIZE; sample with adjusted unigram method
     def init_wn_negative_probs(self):
-        print("Initiative Wordnet Negative Sample Probabilities")
+        print("Initiating Wordnet Negative Sample Probabilities")
         #use adjusted unigram sampling at synset level--raise the word frequencies to the 3/4 power to make less frequent words appear more often
         pow_freq = {ss:self.wn_synset_frequency[ss]**0.75 for ss in self.wn_synset_frequency}
         ss_pow = sum(list(pow_freq.values()))
@@ -231,7 +231,7 @@ class Word2VecWordnetDataset:
                             wn_pairs = []
                             for pos in pos_pairs:
                                 u,v = pos
-                                syns = [s for ss in self.wn_word2synset[u] for s in self.wn_synset2word[ss]]
+                                syns = [s for ss in self.data.wn_word2synset[u] for s in self.data.wn_synset2word[ss]]
                                 
                                 #subsample wordnet similar words before adding
                                 wn_pairs.extend([(s,v) for s in syns
@@ -246,7 +246,7 @@ class Word2VecWordnetDataset:
                                 u,v = pos
                                 
                                 #gets similar words
-                                syns = [s for ss in self.wn_word2synset[u] for s in self.wn_synset2word[ss]]
+                                syns = [s for ss in self.data.wn_word2synset[u] for s in self.data.wn_synset2word[ss]]
                                 
                                 #select similar words based on negative sampling probs
                                 syn_probs = np.array([self.data.negative_probs[i] for i in syns])
@@ -340,32 +340,46 @@ class SkipGramWordnetModel(nn.Module):
         #add in wordnet similarity contrastive loss
         if self.wn_negative_sample:
             
-            all_sim = wn
+            all_sim = wn.numpy().tolist()
             all_not_sim = []
             all_mismatch = []
             
             #sort context and neg sample words by wordnet similarity to target
-            for i in u:
+            for idx,i in enumerate(u):
                 sim = []
                 not_sim = []
                 w2v_mismatch = []
-                for j in v:
-                    #mark as similar if u and j share any synset groups
-                    if len(self.wn_word2synset[u]-self.wn_word2synset[j]) < self.wn_word2synset[u]:
-                        sim.append(j)
-                    else:
-                        w2v_mismatch.append(j)
-                for k in neg:
-                    #mark as similar if u and k share any synset groups
-                    if len(self.wn_word2synset[u]-self.wn_word2synset[k]) < self.wn_word2synset[u]:
-                        sim.append(k)
-                    else:
-                        not_sim.append(k)
+                for j in v[idx]:
+                    #skip padded cells in tensors
+                    if j != 0:
+                        #mark as similar if u and j share any synset groups
+                        if len(self.wn_word2synset[i.item()]-self.wn_word2synset[j.item()]) < len(self.wn_word2synset[i.item()]):
+                            sim.append(j.item())
+                        else:
+                            w2v_mismatch.append(j.item())
+                for k in neg[idx]:
+                    #skip padded cells in tensors
+                    if k != 0:
+                        #mark as similar if u and k share any synset groups
+                        if len(self.wn_word2synset[i.item()]-self.wn_word2synset[k.item()]) < len(self.wn_word2synset[i.item()]):
+                            sim.append(k.item())
+                        else:
+                            not_sim.append(k.item())
                 
-                all_sim[i].extend(sim)
+                all_sim[idx].extend(sim)
                 all_not_sim.append(not_sim)
                 all_mismatch.append(w2v_mismatch)
-                
+            
+            #pad wn lists with zeros for conversion to tensors
+            all_sim_len = max([2,max([len(i) for i in all_sim])])
+            all_sim = [i+([0]*(all_sim_len-len(i))) for i in all_sim]
+    
+            all_not_sim_len = max([2,max([len(i) for i in all_not_sim])])
+            all_not_sim = [i+([0]*(all_not_sim_len-len(i))) for i in all_not_sim]
+    
+            all_mismatch_len = max([2,max([len(i) for i in all_mismatch])])
+            all_mismatch = [i+([0]*(all_mismatch_len-len(i))) for i in all_mismatch]
+            
             
             #get embeddings for wordnet similarity groups
             emb_sim = self.v_embeddings(torch.LongTensor(all_sim))
@@ -407,7 +421,7 @@ class SkipGramWordnetModel(nn.Module):
         wordlist_file = model_dir+"/w2v_wordlist.txt"
         model_file = model_dir+"/w2v_model.pth"
         
-        embeddings = self.embeddings.weight.cpu().data.numpy()
+        embeddings = self.u_embeddings.weight.cpu().data.numpy()
         with open(emb_file, 'w') as ef:
             with open(wordlist_file, "w") as wlf:
                 for wid, w in id2word.items():
@@ -487,7 +501,7 @@ class WordnetFineTuning(nn.Module):
 
 class Word2VecWordnetTrainer:
     def __init__(self, train_dir, input_file_name, model_dir, 
-                 emb_dimension = 100, batch_size = 32, epochs = 3, initial_lr = 0.001, 
+                 emb_dimension = 100, batch_size = 32, num_workers = 0, epochs = 3, initial_lr = 0.001, 
                  window_size = 5, wn_negative_sample = False, wn_positive_sample = False, wn_depth = 0,
                  mismatch_weight=1, w2v_loss_weight=1, wn_loss_weight=1, margin = 1,
                  wn_fine_tune = False, ft_margin_weight = 1, ft_num_negs = 4, ft_epochs = 5):
@@ -497,8 +511,7 @@ class Word2VecWordnetTrainer:
         print("Building Dataset")
         self.data = DataReader(train_dir, input_file_name, self.wn, self.wn_depth)
         dataset = Word2VecWordnetDataset(self.data, window_size, wn_negative_sample, wn_positive_sample)
-# TODO: play with increased number workers to create/process more workers at once
-        self.dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = False, num_workers = 2,
+        self.dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = False, num_workers = num_workers,
                                      collate_fn = dataset.collate_fn)
         
         self.wn_fine_tune = wn_fine_tune
@@ -581,7 +594,7 @@ class Word2VecWordnetTrainer:
                     ft_optimizer.step()
                     
                     if i > 0 and i % 500 == 0:
-                        print(i/len(ft_dataloader),"% Loss:", loss.item())
+                        print((i/len(ft_dataloader))*100,"% Loss:", loss.item())
                     
             ft_model.save_embeddings(self.data.id2word, self.model_dir)
             
@@ -595,6 +608,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_dir', help = 'location for trained embeddings to be saved', required = True)
     parser.add_argument('--emb_dimension', help = 'dimension of trained embedding', type = int, default = 100, required = False)
     parser.add_argument('--batch_size', type = int, default = 1024, required = False)
+    parser.add_argument('--num_workers', help = 'if using cuda, how many cpu cores to use in data loader', type = int, default = 0, required = False)            
     parser.add_argument('--epochs',  help = 'number of full runs through data set', type = int, default = 3, required = False)
     parser.add_argument('--initial_lr', help = 'starting learning rate, to be updated by sparse_adam optimizer', type = float, default = 0.001, required = False)
     parser.add_argument('--window_size', help = 'training window size', type = int, default = 5, required = False)
