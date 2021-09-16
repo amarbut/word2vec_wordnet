@@ -73,7 +73,7 @@ class DataReader:
         self.id2word[0] = ''
         self.word_frequency[0] = 0
         
-        #TODO: add in frequency threshold ~100 (standard per Katy)
+        
         for w, c in word_frequency.items():
             self.word2id[w] = wid
             self.id2word[wid] = w
@@ -320,7 +320,7 @@ class Word2VecWordnetDataset:
         
         all_mismatch = [mismatch for batch in batches for _, _, _, _, _, _, mismatch in batch if len(batch) > 0]
         mismatch_len = max([2,max([len(i) for i in all_mismatch])])
-        all_mismatch = [i+([0]*(not_sim_len-len(i))) for i in all_mismatch]
+        all_mismatch = [i+([0]*(mismatch_len-len(i))) for i in all_mismatch]
         
         
         t_all_u=torch.LongTensor(all_u)
@@ -361,7 +361,7 @@ class SkipGramWordnetModel(nn.Module):
         self.emb_dimension = emb_dimension
         self.wn_negative_sample = wn_negative_sample
         
-#TODO: play with parallelizing embeddings for use on multiple GPU?
+
         #initialize target and context embeddings with vocab size and embedding dimension
         self.u_embeddings = nn.Embedding(vocab_size, emb_dimension, sparse=True, padding_idx = 0)
         self.v_embeddings = nn.Embedding(vocab_size, emb_dimension, sparse=True, padding_idx = 0)
@@ -518,7 +518,7 @@ class WordnetFineTuning(nn.Module):
 #--------------------------------------------------------------------------------------------------------------------------------                    
 
 class Word2VecWordnetTrainer:
-    def __init__(self, train_dir, input_file_name, model_dir, 
+    def __init__(self, datareader, train_dir, input_file_name, model_dir, model_state_dict,
                  emb_dimension = 100, batch_size = 32, num_workers = 0, epochs = 3, initial_lr = 0.001, 
                  window_size = 5, wn_negative_sample = False, wn_positive_sample = False, wn_depth = 0,
                  mismatch_weight=1, w2v_loss_weight=1, wn_loss_weight=1, margin = 1,
@@ -526,30 +526,43 @@ class Word2VecWordnetTrainer:
         
         self.wn = (wn_negative_sample or wn_positive_sample or wn_fine_tune)
         self.wn_depth = wn_depth
-        print("Building Dataset")
-        self.data = DataReader(train_dir, input_file_name, self.wn, self.wn_depth)
-        dataset = Word2VecWordnetDataset(self.data, window_size, wn_negative_sample, wn_positive_sample)
-        self.dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = False, num_workers = num_workers,
-                                     collate_fn = dataset.collate_fn)
         
-        self.wn_fine_tune = wn_fine_tune
-        self.ft_margin_weight = ft_margin_weight
-        self.ft_num_negs = ft_num_negs
-        self.ft_epochs = ft_epochs
+        if datareader is not None:
+            self.data = pickle.load(datareader)
+        else:
+            print("Reading data file")
+            self.data = DataReader(train_dir, input_file_name, self.wn, self.wn_depth)
+            #TODO: Pickle datareader for future use
         
         self.model_dir = model_dir
         self.vocab_size = len(self.data.id2word)
         self.emb_dimension = emb_dimension
+        self.initial_lr = initial_lr
+        self.model = SkipGramWordnetModel(self.vocab_size, self.emb_dimension, wn_negative_sample)
+        
+        if model_state_dict is not None:
+            self.pretrained = True
+            self.model.load_state_dict(model_state_dict)
+        else:
+            self.pretrained = False
+        
+        dataset = Word2VecWordnetDataset(self.data, window_size, wn_negative_sample, wn_positive_sample)
+        self.dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = False, num_workers = num_workers,
+                                     collate_fn = dataset.collate_fn)
+        
         self.batch_size = batch_size
         self.epochs = epochs
-        self.initial_lr = initial_lr
         
         self.mismatch_weight = mismatch_weight
         self.w2v_loss_weight = w2v_loss_weight
         self.wn_loss_weight = wn_loss_weight
         self.margin = margin
-    
-        self.model = SkipGramWordnetModel(self.vocab_size, self.emb_dimension, wn_negative_sample)
+        
+            
+        self.wn_fine_tune = wn_fine_tune
+        self.ft_margin_weight = ft_margin_weight
+        self.ft_num_negs = ft_num_negs
+        self.ft_epochs = ft_epochs
         
         self.use_cuda = torch.cuda.is_available()
         self.device = torch.device("cuda" if self.use_cuda else "cpu")
@@ -558,7 +571,7 @@ class Word2VecWordnetTrainer:
             self.model.cuda()
             
             
-    def train(self):
+    def w2v_train(self):
         print("training on cuda: ", self.use_cuda)
         for epoch in range(self.epochs):
             
@@ -588,7 +601,7 @@ class Word2VecWordnetTrainer:
         
         self.model.save_embeddings(self.data.id2word, self.model_dir)        
 
-# TODO: Turn into own trainer class with word2vec trainer as variable--that way can use pre-trained embeddings without re-training each time                     
+# TODO: Turn into function                      
         if self.wn_fine_tune:
 
             ft_dataset = WordnetFineTuningDataset(self.data, self.ft_num_negs)
@@ -623,10 +636,14 @@ class Word2VecWordnetTrainer:
 #TODO: work out arguments so databuild, skipgram, and fine tune can be performed separately       
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train_dir',  help = 'location of training data', required = True)
-    parser.add_argument('--input_file_name', help = 'text file for training data', required = True)
+    parser.add_argument('--datareader', help = 'pickled pre-built datareader object', default = None,required = False)
+    parser.add_argument('--train_dir',  help = 'location of training data', default = None, required = False)
+    parser.add_argument('--input_file_name', help = 'text file for training data', default = None, required = False)
+    
     parser.add_argument('--model_dir', help = 'location for trained embeddings to be saved', required = True)
     parser.add_argument('--emb_dimension', help = 'dimension of trained embedding', type = int, default = 100, required = False)
+    parser.add_argument('--model_state_dict', help = 'state dict for pre-trained w2v model', default = None, required = False)
+    
     parser.add_argument('--batch_size', type = int, default = 1024, required = False)
     parser.add_argument('--num_workers', help = 'if using cuda, how many cpu cores to use in data loader', type = int, default = 0, required = False)            
     parser.add_argument('--epochs',  help = 'number of full runs through data set', type = int, default = 3, required = False)
@@ -639,6 +656,7 @@ if __name__ == '__main__':
     parser.add_argument('--w2v_loss_weight', help = 'if wn_negative_sample = True: weight for w2v loss function', type = float, default = 1.0, required = False)
     parser.add_argument('--wn_loss_weight', help = 'if wn_negative_sample = True: weight for wn loss function', type = float, default = 1.0, required = False)
     parser.add_argument('--margin', help = 'if wn_negative_sample = True: wn contrastive loss margin', type = float, default = 1.0, required = False)
+    
     parser.add_argument('--wn_fine_tune', help = 'integrate wn knowledge with second model using w2v-trained embeddings; uses contrastive loss to move synset group centroids', type = bool, default = False, required = False)
     parser.add_argument('--ft_margin_weight', help = 'if wn_fine_tune = True: weight for calculating contrastive loss margins based on wn synset path distance', type = float, default = 1.0, required = False)
     parser.add_argument('--ft_num_negs', help = 'if wn_fine_tune = True: number of negative synset groups to be sampled', type = int, default = 4, required = False)
@@ -646,5 +664,10 @@ if __name__ == '__main__':
     
     args = vars(parser.parse_args())
     w2v_wn = Word2VecWordnetTrainer(**args)
-    w2v_wn.train()           
+    
+    if args["model_state_dict"] is None:
+        w2v_wn.train()
+    if args["wn_fine_tune"] is True:
+        w2v_wn.wn_fine_tune()
+           
             
