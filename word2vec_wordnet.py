@@ -334,23 +334,60 @@ class Word2VecWordnetDataset:
         return(t_all_u, t_all_v, t_all_neg, t_all_wn, t_all_sim, t_all_not_sim, t_all_mismatch)
 
 class WordnetFineTuningDataset:
-    def __init__(self, data, num_negs):
+    def __init__(self, data, num_negs, margin_weight):
         self.data = data
         self.synset_list = list(data.wn_synset2word.keys())
         self.num_negs = num_negs
+        self.wn_id2synset = data.wn_id2synset
+        self.wn_synset2word = data.wn_synset2word
+        self.margin_weight = margin_weight
     
     def __len__(self):
         return len(self.synset_list)
     
     #function used to retrieve contrastive synset samples
     def __getitem__(self,idx):
+        
         target = self.synset_list[idx]
         
         #get specified # of other synsets for comparison in contrastive loss function
         negs = self.data.get_wn_negatives(target, self.num_negs)
-        return {'syn':target, 'negs': negs}
-            
         
+        #get synset group word ids
+        syn_words = list(self.wn_synset2word[target])
+        #get neg synset group word ids
+        neg_words = [list(self.wn_synset2word[neg]) for neg in negs]
+        
+        #get actual synset name to calculate wn distance
+        syn = self.wn_id2synset[target]
+        #get actual synset name to calculate wn distance    
+        neg_syns = [self.wn_id2synset[n] for n in negs]
+        
+        #use wn distance between target synset and neg synset to set contrastive loss margins
+        margins = [self.margin_weight*(wn.synset(syn).shortest_path_distance(wn.synset(neg)) or 10) for neg in neg_syns]
+        
+        return {'margins': margins, 'syn_words':syn_words, 'neg_words':neg_words}
+    
+    @staticmethod
+    def collate_fn(batches):
+        #pad batched word lists and convert to tensors
+        all_syn_words = [batch['syn_words'] for batch in batches]
+        syn_len = max([2,max([len(i) for i in all_syn_words])])
+        all_syn_words = [i+([0]*(syn_len-len(i))) for i in all_syn_words]
+        
+        all_neg_words = [batch['neg_words'] for batch in batches]
+        neg_len = max([2,max([len(j) for i in all_neg_words for j in i])])
+        all_neg_words = [[j+([0]*(neg_len-len(j))) for j in i] for i in all_neg_words]
+        
+        all_margins = [batch['margins'] for batch in batches]
+        margin_len = max([2,max([len(i) for i in all_margins])])
+        all_margins = [i+([0]*(margin_len-len(i))) for i in all_margins]
+        
+        t_all_syn_words = torch.LongTensor(all_syn_words)
+        t_all_neg_words = torch.LongTensor(all_neg_words)
+        t_all_margins = torch.LongTensor(all_margins)
+        
+        return (t_all_syn_words, t_all_neg_words, t_all_margins)
 
 #---------------------------------------------------------------------------------------------------------------------------
 
@@ -454,47 +491,32 @@ class WordnetFineTuning(nn.Module):
         super(WordnetFineTuning, self).__init__()
         self.embeddings = skip_gram_model.u_embeddings
         self.num_negs = num_negs
-        self.margin_weight = margin_weight
-        self.wn_id2synset = wn_id2synset
-        self.wn_synset2word = wn_synset2word
         
         
-    def forward(self, targets, negs, margin_weight=1):
+    def forward(self, syn_words, neg_words, margins):
+        print("wordlist")
+        print(syn_words)
+        #get word embeddings
+        syn_embeddings = self.embeddings(syn_words)
+        neg_embeddings = self.embeddings(neg_words)
         
-        #get actual synset name to calculate wn distance
-        syns = [self.wn_id2synset[t] for t in targets]
-        
-        #get embeddings for all words in wn syn group
-        syn_words = [torch.LongTensor(self.wn_synset2word[t]) for t in targets]
-        syn_embeddings = [self.embeddings(words) for words in syn_words]
-        
+        print("embeddings")
+        print(syn_embeddings)
         #use mean of all synset group member embeddings as synset centroid
-        syn_centroids = torch.stack([torch.mean(emb, dim = 0) for emb in syn_embeddings])
+        syn_centroids = torch.mean(syn_embeddings, dim = 1)
         #compute distance between centroid and synset group members
-        syn_dist = [torch.sqrt(torch.sum((syn_centroids[i]-syn_embeddings[i])**2, dim = 1)) for i in range(len(syn_centroids))]
+        syn_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1)-syn_embeddings.unsqueeze(0))**2, dim = 3).squeeze())
         #use contrastive loss to move all words in synset group closer
-        syn_pos_loss = torch.stack([torch.sum(0.5*(dist**2)) for dist in syn_dist])
-        
-        
-        #get actual synset name to calculate wn distance    
-        neg_syns = [[self.id2synset[n] for n in neg] for neg in negs]
-        
-        #get embeddings for all words in each wn neg sample syn group    
-        neg_word_groups = [[torch.LongTensor(self.wn_synset2word[n]) for n in neg] for neg in negs]
-        neg_embedding_groups = [[self.embeddings(words) for words in group] for group in neg_word_groups]
+        syn_pos_loss = torch.sum(0.5*(syn_dist**2))
         
         #use mean of all synset group member embeddings as neg synset group centroid
-        neg_centroids = torch.stack([torch.stack([torch.mean(emb, dim = 0) for emb in group]) for group in neg_embedding_groups])
+        neg_centroids = torch.mean(neg_embeddings, dim = 2)
         #compute distance between neg group centroids and target group centroids
-        neg_dist = torch.sqrt(torch.sum((syn_centroids-neg_centroids)**2, dim = 2))
-        
-        #use wn distance between target synset and neg synset to set contrastive loss margins
-        margins = torch.stack([torch.LongTensor([margin_weight*(wn.synset(syns[i]).shortest_path_distance(wn.synset(neg))) for neg in neg_syns[i]]) for i in range(len(syns))])
+        neg_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1) - neg_centroids.unsqueeze(0))**2, dim = 3).squeeze())
         
         #replace neg_dist with difference from margin or 0 if outside of margin
         neg_dist = torch.sub(margins, neg_dist)
         neg_dist[neg_dist<0] = 0
-        
         #use distances in contrastive loss function
         neg_loss = torch.sum(0.5*(neg_dist**2),1)
 
@@ -605,11 +627,13 @@ class Word2VecWordnetTrainer:
                     
     def wn_ft(self):
 
-        ft_dataset = WordnetFineTuningDataset(self.data, self.ft_num_negs)
+        ft_dataset = WordnetFineTuningDataset(self.data, self.ft_num_negs, self.ft_margin_weight)
         ft_batch_size = int(len(self.data.wn_synset2id)/300)
-        ft_dataloader = DataLoader(ft_dataset, batch_size = ft_batch_size, shuffle = False, num_workers = 0)
+        ft_dataloader = DataLoader(ft_dataset, batch_size = ft_batch_size, shuffle = False, num_workers = 0,
+                                   collate_fn = ft_dataset.collate_fn)
 
-        ft_model = WordnetFineTuning(self.model, self.data.wn_id2synset, self.data.wn_synset2word, self.ft_num_negs, self.ft_margin_weight)
+        ft_model = WordnetFineTuning(self.model, self.data.wn_id2synset, self.data.wn_synset2word,
+                                     self.ft_num_negs, self.ft_margin_weight)
         
         for epoch in range(self.ft_epochs):
             print("Starting Epoch:", (epoch+1))
@@ -619,23 +643,24 @@ class Word2VecWordnetTrainer:
             ft_scheduler = optim.lr_scheduler.CosineAnnealingLR(ft_optimizer, len(ft_dataloader))
             
             for i, batch in enumerate(ft_dataloader):
-                targets = batch['syn']
-                negs = batch['negs']
+                syn_words = batch[0].to(self.device)
+                neg_words = batch[1].to(self.device)
+                margins = batch[2].to(self.device)
                     
                 ft_scheduler.step()
                 ft_optimizer.zero_grad()
-                loss = ft_model.forward(targets, negs, self.ft_margin_weight)
+                loss = ft_model.forward(syn_words, neg_words, margins)
                 loss.backward()
                 ft_optimizer.step()
                 
-                if i > 0 and i % 500 == 0:
+                if i > 0 and i % 10 == 0:
                     print((i/len(ft_dataloader))*100,"% Loss:", loss.item())
-                
+             
         ft_model.save_embeddings(self.data.id2word, self.model_dir)
             
 
 #--------------------------------------------------------------------------------------------------------------------------
-# #TODO: work out arguments so databuild, skipgram, and fine tune can be performed separately       
+   
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--datareader', help = 'pickled pre-built datareader object', default = None,required = False)
@@ -673,3 +698,4 @@ if __name__ == '__main__':
         w2v_wn.wn_fine_tune()
            
             
+#TODO: Chase down na embeddings -- are they na in the real wiki embeddings? Need to figure out switching device for cuda model downloaded from s3
