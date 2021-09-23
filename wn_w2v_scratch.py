@@ -115,11 +115,11 @@ while line:
             pos_pairs = [(u,word_ids[max(i - boundary, 0):i + boundary]) for i, u in enumerate(word_ids) if np.random.rand() > w2v_wn.data.subsample_probs[u]]
             
             
-w2v_wn = Word2VecWordnetTrainer(datareader = "/home/anna/Documents/W2V_Data/w2v_vanilla_datareader_16Sep21.pkl",
+w2v_wn = Word2VecWordnetTrainer(datareader = "/home/anna/Documents/W2V_Data/wn_negsample_datareader_19Sep21.pkl",
                                 #train_dir = "/home/anna/Documents/W2V_Data/", 
                                 #input_file_name = "moby_clean.txt", 
-                                #model_dir = "/home/anna/Documents/W2V_Data/moby_trials", 
-                                model_state_dict = "/home/anna/Documents/W2V_Data/w2v_vanilla_model_16Sep21.pth",
+                                model_dir = "/home/anna/Documents/W2V_Data/wn_ft_trials", 
+                                model_state_dict = "/home/anna/Documents/W2V_Data/wn_negsample_model_19Sep21.pth",
                                 wn_negative_sample = True,
                                 wn_fine_tune = True)
 

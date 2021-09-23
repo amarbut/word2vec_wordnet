@@ -91,8 +91,9 @@ class DataReader:
                 ss = wn.synsets(word)
                 for synset in ss:
                     s = synset.name()
-                    #skip synset if already added
-                    if not s in self.wn_synset2id:
+                    sw = s.split(".")[0]
+                    #skip synset if already added or if not in vocab
+                    if not s in self.wn_synset2id and sw in self.word2id and len(s.split(".")) == 3:
                         syns = [self.word2id[w.lower()] for w in synset.lemma_names() if w.lower() in self.word2id]
                         
                         #add 1st level of hyponyms
@@ -253,44 +254,51 @@ class Word2VecWordnetDataset:
                             for pos in pos_pairs:
                                 u,v = pos
                                 
-                                #gets similar words
-                                syns = [s for ss in self.data.wn_word2synset[u] for s in self.data.wn_synset2word[ss]]
-                                
-                                #select similar words based on negative sampling probs
-                                syn_probs = np.array([self.data.negative_probs[i] for i in syns])
-                                syn_norm = syn_probs/sum(syn_probs)
-                                
-                                wn_pos_ids = np.random.choice(syns, boundary*2, p = syn_norm)
-                                neg_ids = self.data.get_negatives(pos, 4, boundary*2)
-    
-                                wn_pos.append(wn_pos_ids)
-                                negs.append(neg_ids)
-                       
-                            #sort context and neg sample words by wordnet similarity to target
-                                sim = list(wn_pos_ids)
-                                w2v_mismatch = []
-                                not_sim = []
-                                for j in v:
-                                    #skip padded cells
-                                    if j != 0:
-                                        #mark as similar if u and j share any synset groups
-                                        if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[j]) < len(self.data.wn_word2synset[u]):
-                                            sim.append(j)
-                                        else:
-                                            w2v_mismatch.append(j)
-                                for k in neg_ids:
-                                    #skip padded cells in tensors
-                                    if k != 0:
-                                        #mark as similar if u and k share any synset groups
-                                        if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[k]) < len(self.data.wn_word2synset[u]):
-                                            sim.append(k)
-                                        else:
-                                            not_sim.append(k)
-                                
-                                sims.append(sim)
-                                not_sims.append(not_sim)
-                                mismatches.append(w2v_mismatch)
-                                                      
+                                #skip if target word doesn't have synset in vocabulary
+                                if u in self.data.wn_word2synset:
+                                    #gets similar words
+                                    syns = [s for ss in self.data.wn_word2synset[u] for s in self.data.wn_synset2word[ss]]
+                                    
+                                    #select similar words based on negative sampling probs
+                                    syn_probs = np.array([self.data.negative_probs[i] for i in syns])
+                                    syn_norm = syn_probs/sum(syn_probs)
+                                    
+                                    wn_pos_ids = np.random.choice(syns, boundary*2, p = syn_norm)
+                                    neg_ids = self.data.get_negatives(pos, 4, boundary*2)
+        
+                                    wn_pos.append(wn_pos_ids)
+                                    negs.append(neg_ids)
+                           
+                                #sort context and neg sample words by wordnet similarity to target
+                                    sim = list(wn_pos_ids)
+                                    w2v_mismatch = []
+                                    not_sim = []
+                                    for j in v:
+                                        #skip padded cells
+                                        if j != 0 and j in self.data.wn_word2synset:
+                                            #mark as similar if u and j share any synset groups
+                                            if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[j]) < len(self.data.wn_word2synset[u]):
+                                                sim.append(j)
+                                            else:
+                                                w2v_mismatch.append(j)
+                                    for k in neg_ids:
+                                        #skip padded cells in tensors
+                                        if k != 0 and k in self.data.wn_word2synset:
+                                            #mark as similar if u and k share any synset groups
+                                            if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[k]) < len(self.data.wn_word2synset[u]):
+                                                sim.append(k)
+                                            else:
+                                                not_sim.append(k)
+                                    
+                                    sims.append(sim)
+                                    not_sims.append(not_sim)
+                                    mismatches.append(w2v_mismatch)
+                                else:
+                                    negs.append(self.data.get_negatives(pos, 4, boundary*2))
+                                    wn_pos.append([0]*boundary*2)
+                                    sims.append([])
+                                    not_sims.append([])
+                                    mismatches.append([])
                         else:
                         #vanilla negative sampling method from 2nd word2vec paper
                             negs = [self.data.get_negatives(pos,5, boundary*2) for pos in pos_pairs]
@@ -299,7 +307,7 @@ class Word2VecWordnetDataset:
                             not_sims = [[] for _ in range(len(negs))]
                             mismatches = ([[] for _ in range(len(negs))])
                     return([(pair[0],pair[1],negs[i], wn_pos[i], sims[i], not_sims[i], mismatches[i]) for i,pair in enumerate(pos_pairs)])
-                        
+                    
 
     @staticmethod
     #combine all target, context, and negative samples into tensors for each batch
@@ -364,7 +372,7 @@ class WordnetFineTuningDataset:
         neg_syns = [self.wn_id2synset[n] for n in negs]
         
         #use wn distance between target synset and neg synset to set contrastive loss margins
-        margins = [self.margin_weight*(wn.synset(syn).shortest_path_distance(wn.synset(neg)) or 10) for neg in neg_syns]
+        margins = [self.margin_weight*(min((wn.synset(syn).shortest_path_distance(wn.synset(neg)) or 10),10)) for neg in neg_syns]
         
         return {'margins': margins, 'syn_words':syn_words, 'neg_words':neg_words}
     
@@ -406,6 +414,8 @@ class SkipGramWordnetModel(nn.Module):
         initrange = 1.0 / self.emb_dimension
         #initialize target embeddings with random nums between -/+ initrange
         init.uniform_(self.u_embeddings.weight.data, -initrange, initrange)
+        #reset padding index (0) to all 0 values
+        self.u_embeddings.weight.data[0] = 0
         #initialize context embeddings with zeros--first values will be determined by loss update after first batch
         init.constant_(self.v_embeddings.weight.data, 0)
         
@@ -487,39 +497,38 @@ class SkipGramWordnetModel(nn.Module):
 
     
 class WordnetFineTuning(nn.Module):
-    def __init__(self, skip_gram_model, wn_id2synset, wn_synset2word, num_negs, margin_weight):
+    def __init__(self, wn_id2synset, wn_synset2word, num_negs, margin_weight, vocab_size, emb_dimension):
         super(WordnetFineTuning, self).__init__()
-        self.embeddings = skip_gram_model.u_embeddings
         self.num_negs = num_negs
-        
+        self.embeddings = nn.Embedding(vocab_size, emb_dimension, sparse=True, padding_idx = 0)
         
     def forward(self, syn_words, neg_words, margins):
-        print("wordlist")
-        print(syn_words)
         #get word embeddings
         syn_embeddings = self.embeddings(syn_words)
         neg_embeddings = self.embeddings(neg_words)
-        
-        print("embeddings")
-        print(syn_embeddings)
+      
         #use mean of all synset group member embeddings as synset centroid
-        syn_centroids = torch.mean(syn_embeddings, dim = 1)
+        #use mask to ignore padding "words" (all 0 values)
+        syn_mask = syn_embeddings != 0
+        syn_centroids = torch.sum(syn_embeddings, dim = 1)/syn_mask.sum(dim = 1)
         #compute distance between centroid and synset group members
-        syn_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1)-syn_embeddings.unsqueeze(0))**2, dim = 3).squeeze())
+        syn_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1)-syn_embeddings.unsqueeze(0))**2, dim = 3).squeeze() + 0.00001)
         #use contrastive loss to move all words in synset group closer
-        syn_pos_loss = torch.sum(0.5*(syn_dist**2))
+        syn_pos_loss = torch.sum(0.5*(syn_dist**2),1)
         
         #use mean of all synset group member embeddings as neg synset group centroid
-        neg_centroids = torch.mean(neg_embeddings, dim = 2)
+        #use mask to ignore padding "words" (all 0 values)
+        neg_mask = neg_embeddings != 0
+        neg_centroids = torch.sum(neg_embeddings, dim = 2)/neg_mask.sum(dim = 2)
         #compute distance between neg group centroids and target group centroids
-        neg_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1) - neg_centroids.unsqueeze(0))**2, dim = 3).squeeze())
+        neg_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1) - neg_centroids.unsqueeze(0))**2, dim = 3).squeeze() + 0.00001)
         
         #replace neg_dist with difference from margin or 0 if outside of margin
         neg_dist = torch.sub(margins, neg_dist)
         neg_dist[neg_dist<0] = 0
         #use distances in contrastive loss function
         neg_loss = torch.sum(0.5*(neg_dist**2),1)
-
+        
         loss = syn_pos_loss + neg_loss
         return(torch.mean(loss))
         
@@ -544,7 +553,7 @@ class Word2VecWordnetTrainer:
                  emb_dimension = 100, batch_size = 32, num_workers = 0, epochs = 3, initial_lr = 0.001, 
                  window_size = 5, wn_negative_sample = False, wn_positive_sample = False, wn_depth = 0,
                  mismatch_weight=1, w2v_loss_weight=1, wn_loss_weight=1, margin = 1,
-                 wn_fine_tune = False, ft_margin_weight = 1, ft_num_negs = 4, ft_epochs = 5):
+                 wn_fine_tune = False, ft_margin_weight = 0.1, ft_num_negs = 4, ft_epochs = 5):
         
         self.wn = (wn_negative_sample or wn_positive_sample or wn_fine_tune)
         self.wn_depth = wn_depth
@@ -563,36 +572,43 @@ class Word2VecWordnetTrainer:
         self.initial_lr = initial_lr
         self.model = SkipGramWordnetModel(self.vocab_size, self.emb_dimension, wn_negative_sample)
         
-        if model_state_dict is not None:
-            self.pretrained = True
-            self.model.load_state_dict(torch.load(model_state_dict))
-        else:
-            self.pretrained = False
-        
-        dataset = Word2VecWordnetDataset(self.data, window_size, wn_negative_sample, wn_positive_sample)
-        self.dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = False, num_workers = num_workers,
-                                     collate_fn = dataset.collate_fn)
-        
-        self.batch_size = batch_size
-        self.epochs = epochs
-        
-        self.mismatch_weight = mismatch_weight
-        self.w2v_loss_weight = w2v_loss_weight
-        self.wn_loss_weight = wn_loss_weight
-        self.margin = margin
-        
-            
-        self.wn_fine_tune = wn_fine_tune
-        self.ft_margin_weight = ft_margin_weight
-        self.ft_num_negs = ft_num_negs
-        self.ft_epochs = ft_epochs
-        
         self.use_cuda = torch.cuda.is_available()
         self.device = torch.device("cuda" if self.use_cuda else "cpu")
         print("cuda available:", self.use_cuda)
         if self.use_cuda:
             self.model.cuda()
+        
+        if model_state_dict is not None:
+            self.pretrained = True
+            self.model.load_state_dict(torch.load(model_state_dict, map_location = self.device))
+        else:
+            self.pretrained = False
+            dataset = Word2VecWordnetDataset(self.data, window_size, wn_negative_sample, wn_positive_sample)
+            self.dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = False, num_workers = num_workers,
+                                         collate_fn = dataset.collate_fn)
             
+            self.batch_size = batch_size
+            self.epochs = epochs
+            
+            self.mismatch_weight = mismatch_weight
+            self.w2v_loss_weight = w2v_loss_weight
+            self.wn_loss_weight = wn_loss_weight
+            self.margin = margin
+        
+            
+        self.wn_fine_tune = wn_fine_tune
+        if self.wn_fine_tune:
+            self.ft_margin_weight = ft_margin_weight
+            self.ft_num_negs = ft_num_negs
+            self.ft_epochs = ft_epochs
+            
+            self.ft_dataset = WordnetFineTuningDataset(self.data, self.ft_num_negs, self.ft_margin_weight)
+            self.ft_batch_size = int(len(self.data.wn_synset2id)/1000)#change back to 300?
+            self.ft_dataloader = DataLoader(self.ft_dataset, batch_size = self.ft_batch_size, shuffle = False, num_workers = 0,
+                                   collate_fn = self.ft_dataset.collate_fn)
+            self.ft_model = WordnetFineTuning(self.data.wn_id2synset, self.data.wn_synset2word,
+                                              self.ft_num_negs, self.ft_margin_weight, self.vocab_size, self.emb_dimension)
+             
             
     def w2v_train(self):
         print("training on cuda: ", self.use_cuda)
@@ -626,37 +642,31 @@ class Word2VecWordnetTrainer:
 
                     
     def wn_ft(self):
-
-        ft_dataset = WordnetFineTuningDataset(self.data, self.ft_num_negs, self.ft_margin_weight)
-        ft_batch_size = int(len(self.data.wn_synset2id)/300)
-        ft_dataloader = DataLoader(ft_dataset, batch_size = ft_batch_size, shuffle = False, num_workers = 0,
-                                   collate_fn = ft_dataset.collate_fn)
-
-        ft_model = WordnetFineTuning(self.model, self.data.wn_id2synset, self.data.wn_synset2word,
-                                     self.ft_num_negs, self.ft_margin_weight)
-        
+        self.ft_model.embeddings.weight.data.copy_(self.model.u_embeddings.weight.data)
         for epoch in range(self.ft_epochs):
             print("Starting Epoch:", (epoch+1))
             
             # set initial learning rate at 1/10 skipgram rate--encourage small adjustments to pre-trained embeddings
-            ft_optimizer = optim.SparseAdam(ft_model.parameters(), lr = (self.initial_lr/10))
-            ft_scheduler = optim.lr_scheduler.CosineAnnealingLR(ft_optimizer, len(ft_dataloader))
+            ft_optimizer = optim.SparseAdam(self.ft_model.parameters(), lr = (self.initial_lr/10))
+            ft_scheduler = optim.lr_scheduler.CosineAnnealingLR(ft_optimizer, len(self.ft_dataloader))
             
-            for i, batch in enumerate(ft_dataloader):
+            for i, batch in enumerate(self.ft_dataloader):
                 syn_words = batch[0].to(self.device)
                 neg_words = batch[1].to(self.device)
                 margins = batch[2].to(self.device)
                     
                 ft_scheduler.step()
                 ft_optimizer.zero_grad()
-                loss = ft_model.forward(syn_words, neg_words, margins)
+                loss = self.ft_model.forward(syn_words, neg_words, margins)
                 loss.backward()
                 ft_optimizer.step()
                 
                 if i > 0 and i % 10 == 0:
-                    print((i/len(ft_dataloader))*100,"% Loss:", loss.item())
+                    print((i/len(self.ft_dataloader))*100,"% Loss:", loss.item())
+            break
+
              
-        ft_model.save_embeddings(self.data.id2word, self.model_dir)
+        self.ft_model.save_embeddings(self.data.id2word, self.model_dir)
             
 
 #--------------------------------------------------------------------------------------------------------------------------
@@ -685,7 +695,7 @@ if __name__ == '__main__':
     parser.add_argument('--margin', help = 'if wn_negative_sample = True: wn contrastive loss margin', type = float, default = 1.0, required = False)
     
     parser.add_argument('--wn_fine_tune', help = 'integrate wn knowledge with second model using w2v-trained embeddings; uses contrastive loss to move synset group centroids', type = bool, default = False, required = False)
-    parser.add_argument('--ft_margin_weight', help = 'if wn_fine_tune = True: weight for calculating contrastive loss margins based on wn synset path distance', type = float, default = 1.0, required = False)
+    parser.add_argument('--ft_margin_weight', help = 'if wn_fine_tune = True: weight for calculating contrastive loss margins based on wn synset path distance', type = float, default = 0.1, required = False)
     parser.add_argument('--ft_num_negs', help = 'if wn_fine_tune = True: number of negative synset groups to be sampled', type = int, default = 4, required = False)
     parser.add_argument('--ft_epochs', help = 'if wn_fine_tune = True: number of full runs through wn dataset', type = int, default = 5, required = False)
     
@@ -697,5 +707,3 @@ if __name__ == '__main__':
     if args["wn_fine_tune"] is True:
         w2v_wn.wn_fine_tune()
            
-            
-#TODO: Chase down na embeddings -- are they na in the real wiki embeddings? Need to figure out switching device for cuda model downloaded from s3
