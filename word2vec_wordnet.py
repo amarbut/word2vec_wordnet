@@ -608,6 +608,9 @@ class Word2VecWordnetTrainer:
                                    collate_fn = self.ft_dataset.collate_fn)
             self.ft_model = WordnetFineTuning(self.data.wn_id2synset, self.data.wn_synset2word,
                                               self.ft_num_negs, self.ft_margin_weight, self.vocab_size, self.emb_dimension)
+            if self.use_cuda:
+                self.ft_model.cuda()
+        
              
             
     def w2v_train(self):
