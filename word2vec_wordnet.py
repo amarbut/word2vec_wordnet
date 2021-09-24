@@ -704,5 +704,5 @@ if __name__ == '__main__':
     if args["model_state_dict"] is None:
         w2v_wn.w2v_train()
     if args["wn_fine_tune"] is True:
-        w2v_wn.wn_fine_tune()
+        w2v_wn.wn_ft()
            
