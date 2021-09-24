@@ -553,7 +553,7 @@ class Word2VecWordnetTrainer:
                  emb_dimension = 100, batch_size = 32, num_workers = 0, epochs = 3, initial_lr = 0.001, 
                  window_size = 5, wn_negative_sample = False, wn_positive_sample = False, wn_depth = 0,
                  mismatch_weight=1, w2v_loss_weight=1, wn_loss_weight=1, margin = 1,
-                 wn_fine_tune = False, ft_margin_weight = 0.1, ft_num_negs = 4, ft_epochs = 5):
+                 wn_fine_tune = False, ft_margin_weight = 0.1, ft_num_negs = 4, ft_epochs = 15):
         
         self.wn = (wn_negative_sample or wn_positive_sample or wn_fine_tune)
         self.wn_depth = wn_depth
@@ -631,14 +631,14 @@ class Word2VecWordnetTrainer:
                     not_sim = batch[5].to(self.device)
                     mismatch = batch[6].to(self.device)
                     
-                    scheduler.step()
                     optimizer.zero_grad()
                     loss = self.model.forward(u, v, neg, wn, sim, not_sim, mismatch, self.mismatch_weight, self.w2v_loss_weight, self.wn_loss_weight, self.margin)
                     loss.backward()
                     optimizer.step()
                     
-                    if i % 100 == 0:
+                    if i % 500 == 0:
                         print((i/len(self.dataloader))*100,"% Loss:", loss.item())
+                        scheduler.step()
 
         
         self.model.save_embeddings(self.data.id2word, self.model_dir)        
@@ -657,15 +657,16 @@ class Word2VecWordnetTrainer:
                 syn_words = batch[0].to(self.device)
                 neg_words = batch[1].to(self.device)
                 margins = batch[2].to(self.device)
-                    
-                ft_scheduler.step()
+
                 ft_optimizer.zero_grad()
                 loss = self.ft_model.forward(syn_words, neg_words, margins)
                 loss.backward()
                 ft_optimizer.step()
                                 
-                if i % 10 == 0:
+                if i % 100 == 0:
                     print((i/len(self.ft_dataloader))*100,"% Loss:", loss.item())
+                    ft_scheduler.step()                    
+        
 
              
         self.ft_model.save_embeddings(self.data.id2word, self.model_dir)
@@ -673,39 +674,39 @@ class Word2VecWordnetTrainer:
 
 #--------------------------------------------------------------------------------------------------------------------------
    
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--datareader', help = 'pickled pre-built datareader object', default = None,required = False)
-    parser.add_argument('--train_dir',  help = 'location of training data', default = None, required = False)
-    parser.add_argument('--input_file_name', help = 'text file for training data', default = None, required = False)
+# if __name__ == '__main__':
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('--datareader', help = 'pickled pre-built datareader object', default = None,required = False)
+#     parser.add_argument('--train_dir',  help = 'location of training data', default = None, required = False)
+#     parser.add_argument('--input_file_name', help = 'text file for training data', default = None, required = False)
     
-    parser.add_argument('--model_dir', help = 'location for trained embeddings to be saved', required = True)
-    parser.add_argument('--emb_dimension', help = 'dimension of trained embedding', type = int, default = 100, required = False)
-    parser.add_argument('--model_state_dict', help = 'state dict for pre-trained w2v model', default = None, required = False)
+#     parser.add_argument('--model_dir', help = 'location for trained embeddings to be saved', required = True)
+#     parser.add_argument('--emb_dimension', help = 'dimension of trained embedding', type = int, default = 100, required = False)
+#     parser.add_argument('--model_state_dict', help = 'state dict for pre-trained w2v model', default = None, required = False)
     
-    parser.add_argument('--batch_size', type = int, default = 1024, required = False)
-    parser.add_argument('--num_workers', help = 'if using cuda, how many cpu cores to use in data loader', type = int, default = 0, required = False)            
-    parser.add_argument('--epochs',  help = 'number of full runs through data set', type = int, default = 3, required = False)
-    parser.add_argument('--initial_lr', help = 'starting learning rate, to be updated by sparse_adam optimizer', type = float, default = 0.001, required = False)
-    parser.add_argument('--window_size', help = 'training window size', type = int, default = 5, required = False)
-    parser.add_argument('--wn_negative_sample', help = 'integrate wn knowledge in w2v loss function with additional contrastive loss', type = bool, default = False, required = False)
-    parser.add_argument('--wn_positive_sample', help = 'integrate wn knowledge in w2v loss by extending with target word-synset member replacement', type = bool, default = False, required = False)
-    parser.add_argument('--wn_depth', help = 'how many levels of hyponyms to include in a wn synset group, between 0 (synset members only) and 2', type = int, default = 0, required = False)
-    parser.add_argument('--mismatch_weight', help = 'if wn_negative_sample = True: weight for wn similar words in w2v loss function, and w2v positive context words in wn loss function', type = float, default = 1.0, required = False)
-    parser.add_argument('--w2v_loss_weight', help = 'if wn_negative_sample = True: weight for w2v loss function', type = float, default = 1.0, required = False)
-    parser.add_argument('--wn_loss_weight', help = 'if wn_negative_sample = True: weight for wn loss function', type = float, default = 1.0, required = False)
-    parser.add_argument('--margin', help = 'if wn_negative_sample = True: wn contrastive loss margin', type = float, default = 1.0, required = False)
+#     parser.add_argument('--batch_size', type = int, default = 1024, required = False)
+#     parser.add_argument('--num_workers', help = 'if using cuda, how many cpu cores to use in data loader', type = int, default = 0, required = False)            
+#     parser.add_argument('--epochs',  help = 'number of full runs through data set', type = int, default = 3, required = False)
+#     parser.add_argument('--initial_lr', help = 'starting learning rate, to be updated by sparse_adam optimizer', type = float, default = 0.001, required = False)
+#     parser.add_argument('--window_size', help = 'training window size', type = int, default = 5, required = False)
+#     parser.add_argument('--wn_negative_sample', help = 'integrate wn knowledge in w2v loss function with additional contrastive loss', type = bool, default = False, required = False)
+#     parser.add_argument('--wn_positive_sample', help = 'integrate wn knowledge in w2v loss by extending with target word-synset member replacement', type = bool, default = False, required = False)
+#     parser.add_argument('--wn_depth', help = 'how many levels of hyponyms to include in a wn synset group, between 0 (synset members only) and 2', type = int, default = 0, required = False)
+#     parser.add_argument('--mismatch_weight', help = 'if wn_negative_sample = True: weight for wn similar words in w2v loss function, and w2v positive context words in wn loss function', type = float, default = 1.0, required = False)
+#     parser.add_argument('--w2v_loss_weight', help = 'if wn_negative_sample = True: weight for w2v loss function', type = float, default = 1.0, required = False)
+#     parser.add_argument('--wn_loss_weight', help = 'if wn_negative_sample = True: weight for wn loss function', type = float, default = 1.0, required = False)
+#     parser.add_argument('--margin', help = 'if wn_negative_sample = True: wn contrastive loss margin', type = float, default = 1.0, required = False)
     
-    parser.add_argument('--wn_fine_tune', help = 'integrate wn knowledge with second model using w2v-trained embeddings; uses contrastive loss to move synset group centroids', type = bool, default = False, required = False)
-    parser.add_argument('--ft_margin_weight', help = 'if wn_fine_tune = True: weight for calculating contrastive loss margins based on wn synset path distance', type = float, default = 0.1, required = False)
-    parser.add_argument('--ft_num_negs', help = 'if wn_fine_tune = True: number of negative synset groups to be sampled', type = int, default = 4, required = False)
-    parser.add_argument('--ft_epochs', help = 'if wn_fine_tune = True: number of full runs through wn dataset', type = int, default = 5, required = False)
+#     parser.add_argument('--wn_fine_tune', help = 'integrate wn knowledge with second model using w2v-trained embeddings; uses contrastive loss to move synset group centroids', type = bool, default = False, required = False)
+#     parser.add_argument('--ft_margin_weight', help = 'if wn_fine_tune = True: weight for calculating contrastive loss margins based on wn synset path distance', type = float, default = 0.1, required = False)
+#     parser.add_argument('--ft_num_negs', help = 'if wn_fine_tune = True: number of negative synset groups to be sampled', type = int, default = 4, required = False)
+#     parser.add_argument('--ft_epochs', help = 'if wn_fine_tune = True: number of full runs through wn dataset', type = int, default = 15, required = False)
     
-    args = vars(parser.parse_args())
-    w2v_wn = Word2VecWordnetTrainer(**args)
+#     args = vars(parser.parse_args())
+#     w2v_wn = Word2VecWordnetTrainer(**args)
     
-    if args["model_state_dict"] is None:
-        w2v_wn.w2v_train()
-    if args["wn_fine_tune"] is True:
-        w2v_wn.wn_ft()
+#     if args["model_state_dict"] is None:
+#         w2v_wn.w2v_train()
+#     if args["wn_fine_tune"] is True:
+#         w2v_wn.wn_ft()
            
