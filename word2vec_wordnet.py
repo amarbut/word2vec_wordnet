@@ -512,7 +512,7 @@ class WordnetFineTuning(nn.Module):
         syn_mask = syn_embeddings != 0
         syn_centroids = torch.sum(syn_embeddings, dim = 1)/syn_mask.sum(dim = 1)
         #compute distance between centroid and synset group members
-        syn_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1)-syn_embeddings.unsqueeze(0))**2, dim = 3).squeeze() + 0.00001)
+        syn_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1)-syn_embeddings.unsqueeze(0))**2, dim = 3).squeeze() + 1e-9)
         #use contrastive loss to move all words in synset group closer
         syn_pos_loss = torch.sum(0.5*(syn_dist**2),1)
         
@@ -521,7 +521,7 @@ class WordnetFineTuning(nn.Module):
         neg_mask = neg_embeddings != 0
         neg_centroids = torch.sum(neg_embeddings, dim = 2)/neg_mask.sum(dim = 2)
         #compute distance between neg group centroids and target group centroids
-        neg_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1) - neg_centroids.unsqueeze(0))**2, dim = 3).squeeze() + 0.00001)
+        neg_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1) - neg_centroids.unsqueeze(0))**2, dim = 3).squeeze() + 1e-9)
         
         #replace neg_dist with difference from margin or 0 if outside of margin
         neg_dist = torch.sub(margins, neg_dist)
@@ -619,7 +619,7 @@ class Word2VecWordnetTrainer:
             
             print('\nStarting Epoch', (epoch+1))
             optimizer = optim.SparseAdam(self.model.parameters(), lr = self.initial_lr)
-            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(self.dataloader))
+            #scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(self.dataloader))
             
             for i, batch in enumerate(self.dataloader):
                 if len(batch[0])>1:
@@ -638,8 +638,8 @@ class Word2VecWordnetTrainer:
                     
                     if i % 100 == 0:
                         print((i/len(self.dataloader))*100,"% Loss:", loss.item())
-                    if i % 10000 == 0:
-                        scheduler.step()
+                    # if i % 10000 == 0:
+                    #     scheduler.step()
 
         
         self.model.save_embeddings(self.data.id2word, self.model_dir)        
@@ -652,7 +652,7 @@ class Word2VecWordnetTrainer:
             
             # set initial learning rate at 1/10 skipgram rate--encourage small adjustments to pre-trained embeddings
             ft_optimizer = optim.SparseAdam(self.ft_model.parameters(), lr = (self.initial_lr/10))
-            ft_scheduler = optim.lr_scheduler.CosineAnnealingLR(ft_optimizer, len(self.ft_dataloader))
+            #ft_scheduler = optim.lr_scheduler.CosineAnnealingLR(ft_optimizer, len(self.ft_dataloader))
             
             for i, batch in enumerate(self.ft_dataloader):
                 syn_words = batch[0].to(self.device)
@@ -666,8 +666,8 @@ class Word2VecWordnetTrainer:
                                 
                 if i % 100 == 0:
                     print((i/len(self.ft_dataloader))*100,"% Loss:", loss.item())
-                if i % 1000 == 0:
-                    ft_scheduler.step()                    
+                # if i % 1000 == 0:
+                #     ft_scheduler.step()                    
         
 
              
