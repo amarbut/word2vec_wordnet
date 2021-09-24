@@ -636,8 +636,9 @@ class Word2VecWordnetTrainer:
                     loss.backward()
                     optimizer.step()
                     
-                    if i % 500 == 0:
+                    if i % 100 == 0:
                         print((i/len(self.dataloader))*100,"% Loss:", loss.item())
+                    if i % 10000 == 0:
                         scheduler.step()
 
         
@@ -665,6 +666,7 @@ class Word2VecWordnetTrainer:
                                 
                 if i % 100 == 0:
                     print((i/len(self.ft_dataloader))*100,"% Loss:", loss.item())
+                if i % 1000 == 0:
                     ft_scheduler.step()                    
         
 
