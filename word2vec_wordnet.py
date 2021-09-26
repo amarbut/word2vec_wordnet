@@ -57,8 +57,8 @@ class DataReader:
         word_frequency = dict()
         for line in open(self.input_file_name, encoding = 'utf8'):
             line = line.split()
+            self.sentence_count += 1
             if len(line) > 1:
-                self.sentence_count += 1
                 for word in line:
                     if len(word) > 0:
                         self.token_count += 1
@@ -195,151 +195,153 @@ class Word2VecWordnetDataset:
     
     #function used to retrieve samples for each line (target (or wordnet syn), [context], [negative context], [wordnet syn]) 
     def __getitem__(self, idx):
-        while True:
+        self.input_file.seek(idx)
+        line = self.input_file.readline()
         
-            line = self.input_file.readline()
-            if not line:
-                self.input_file.seek(0, 0)
-                line = self.input_file.readline()
+        if len(line) > 1:
+            words = line.strip().split()
 
-            if len(line) > 1:
-                words = line.strip().split()
-
-                if len(words) > 1:
-                    #collect word ids for sentence, ignoring words w/ subsample probability
-                    word_ids = [self.data.word2id[w] for w in words if w in self.data.word2id]
+            if len(words) > 1:
+                #collect word ids for sentence, ignoring words w/ subsample probability
+                word_ids = [self.data.word2id[w] for w in words if w in self.data.word2id]
+                
+                boundary = int((self.window_size-1)/2)
+                
+                
+                #collect list of all target/positive context pairs
+                #PAD LIST SO THAT ALL THE SAME LENGTH WHEN CONVERT TO TENSOR
+                pos_pairs = [(u,word_ids[int(max(i - boundary, 0)):int(i + boundary+1)]) for i, u in enumerate(word_ids) if np.random.rand() > self.data.subsample_probs[int(u)]]
+                pos_pairs = [(u,v+([0]*((boundary*2)-len(v)+1))) for u,v in pos_pairs]
+                if len(pos_pairs) == 0:
+                    return([])
+                
+                #do vanilla word2vec neg sampling without wordnet input
+                if not self.wn_negative_sample and not self.wn_positive_sample:
                     
-                    boundary = int((self.window_size-1)/2)
-                    
-                    
-                    #collect list of all target/positive context pairs
-                    #PAD LIST SO THAT ALL THE SAME LENGTH WHEN CONVERT TO TENSOR
-                    pos_pairs = [(u,word_ids[int(max(i - boundary, 0)):int(i + boundary+1)]) for i, u in enumerate(word_ids) if np.random.rand() > self.data.subsample_probs[int(u)]]
-                    pos_pairs = [(u,v+([0]*((boundary*2)-len(v)+1))) for u,v in pos_pairs]
-                    if len(pos_pairs) == 0:
-                        return([])
-                    
-                    #do vanilla word2vec neg sampling without wordnet input
-                    if not self.wn_negative_sample and not self.wn_positive_sample:
-                        
+                    negs = [self.data.get_negatives(pos,5, boundary*2) for pos in pos_pairs]
+                    wn_pos = [[] for _ in range(len(negs))]
+                    sims = [[] for _ in range(len(negs))]
+                    not_sims = [[] for _ in range(len(negs))]
+                    mismatches = ([[] for _ in range(len(negs))])
+                
+                #add wordnet to sample as target word or negative sample
+                else:
+                     
+                    if self.wn_positive_sample: #TODO: randomize whether this happens for every word? How many new pos examples are added?
+                    #replace target word with wordnet similar words and add to positive examples
+                        wn_pairs = []
+                        for pos in pos_pairs:
+                            u,v = pos
+                            syns = [s for ss in self.data.wn_word2synset[u] for s in self.data.wn_synset2word[ss]]
+                            
+                            #subsample wordnet similar words before adding
+                            wn_pairs.extend([(s,v) for s in syns
+                                                 if np.random.rand() > self.data.subsample_probs[s]])
+                        pos_pairs.extend(wn_pairs)
+        
+                    if self.wn_negative_sample:
+                    #include one wordnet similar word per positive context to provide positive wordnet similarity samples
+                    #create wn contrastive loss lists
+                        negs = []
+                        wn_pos = []
+                        sims = []
+                        not_sims = []
+                        mismatches = []
+                        for pos in pos_pairs:
+                            u,v = pos
+                            
+                            #skip if target word doesn't have synset in vocabulary
+                            if u in self.data.wn_word2synset:
+                                #gets similar words
+                                syns = [s for ss in self.data.wn_word2synset[u] for s in self.data.wn_synset2word[ss]]
+                                
+                                #select similar words based on negative sampling probs
+                                syn_probs = np.array([self.data.negative_probs[i] for i in syns])
+                                syn_norm = syn_probs/sum(syn_probs)
+                                
+                                wn_pos_ids = np.random.choice(syns, boundary*2, p = syn_norm)
+                                neg_ids = self.data.get_negatives(pos, 4, boundary*2)
+    
+                                wn_pos.append(wn_pos_ids)
+                                negs.append(neg_ids)
+                       
+                            #sort context and neg sample words by wordnet similarity to target
+                                sim = list(wn_pos_ids)
+                                w2v_mismatch = []
+                                not_sim = []
+                                for j in v:
+                                    #skip padded cells
+                                    if j != 0 and j in self.data.wn_word2synset:
+                                        #mark as similar if u and j share any synset groups
+                                        if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[j]) < len(self.data.wn_word2synset[u]):
+                                            sim.append(j)
+                                        else:
+                                            w2v_mismatch.append(j)
+                                for k in neg_ids:
+                                    #skip padded cells in tensors
+                                    if k != 0 and k in self.data.wn_word2synset:
+                                        #mark as similar if u and k share any synset groups
+                                        if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[k]) < len(self.data.wn_word2synset[u]):
+                                            sim.append(k)
+                                        else:
+                                            not_sim.append(k)
+                                
+                                sims.append(sim)
+                                not_sims.append(not_sim)
+                                mismatches.append(w2v_mismatch)
+                            else:
+                                negs.append(self.data.get_negatives(pos, 4, boundary*2))
+                                wn_pos.append([0]*boundary*2)
+                                sims.append([])
+                                not_sims.append([])
+                                mismatches.append([])
+                    else:
+                    #vanilla negative sampling method from 2nd word2vec paper
                         negs = [self.data.get_negatives(pos,5, boundary*2) for pos in pos_pairs]
                         wn_pos = [[] for _ in range(len(negs))]
                         sims = [[] for _ in range(len(negs))]
                         not_sims = [[] for _ in range(len(negs))]
                         mismatches = ([[] for _ in range(len(negs))])
-                    
-                    #add wordnet to sample as target word or negative sample
-                    else:
-                         
-                        if self.wn_positive_sample: #TODO: randomize whether this happens for every word? How many new pos examples are added?
-                        #replace target word with wordnet similar words and add to positive examples
-                            wn_pairs = []
-                            for pos in pos_pairs:
-                                u,v = pos
-                                syns = [s for ss in self.data.wn_word2synset[u] for s in self.data.wn_synset2word[ss]]
-                                
-                                #subsample wordnet similar words before adding
-                                wn_pairs.extend([(s,v) for s in syns
-                                                     if np.random.rand() > self.data.subsample_probs[s]])
-                            pos_pairs.extend(wn_pairs)
-            
-                        if self.wn_negative_sample:
-                        #include one wordnet similar word per positive context to provide positive wordnet similarity samples
-                        #create wn contrastive loss lists
-                            negs = []
-                            wn_pos = []
-                            sims = []
-                            not_sims = []
-                            mismatches = []
-                            for pos in pos_pairs:
-                                u,v = pos
-                                
-                                #skip if target word doesn't have synset in vocabulary
-                                if u in self.data.wn_word2synset:
-                                    #gets similar words
-                                    syns = [s for ss in self.data.wn_word2synset[u] for s in self.data.wn_synset2word[ss]]
-                                    
-                                    #select similar words based on negative sampling probs
-                                    syn_probs = np.array([self.data.negative_probs[i] for i in syns])
-                                    syn_norm = syn_probs/sum(syn_probs)
-                                    
-                                    wn_pos_ids = np.random.choice(syns, boundary*2, p = syn_norm)
-                                    neg_ids = self.data.get_negatives(pos, 4, boundary*2)
-        
-                                    wn_pos.append(wn_pos_ids)
-                                    negs.append(neg_ids)
-                           
-                                #sort context and neg sample words by wordnet similarity to target
-                                    sim = list(wn_pos_ids)
-                                    w2v_mismatch = []
-                                    not_sim = []
-                                    for j in v:
-                                        #skip padded cells
-                                        if j != 0 and j in self.data.wn_word2synset:
-                                            #mark as similar if u and j share any synset groups
-                                            if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[j]) < len(self.data.wn_word2synset[u]):
-                                                sim.append(j)
-                                            else:
-                                                w2v_mismatch.append(j)
-                                    for k in neg_ids:
-                                        #skip padded cells in tensors
-                                        if k != 0 and k in self.data.wn_word2synset:
-                                            #mark as similar if u and k share any synset groups
-                                            if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[k]) < len(self.data.wn_word2synset[u]):
-                                                sim.append(k)
-                                            else:
-                                                not_sim.append(k)
-                                    
-                                    sims.append(sim)
-                                    not_sims.append(not_sim)
-                                    mismatches.append(w2v_mismatch)
-                                else:
-                                    negs.append(self.data.get_negatives(pos, 4, boundary*2))
-                                    wn_pos.append([0]*boundary*2)
-                                    sims.append([])
-                                    not_sims.append([])
-                                    mismatches.append([])
-                        else:
-                        #vanilla negative sampling method from 2nd word2vec paper
-                            negs = [self.data.get_negatives(pos,5, boundary*2) for pos in pos_pairs]
-                            wn_pos = [[] for _ in range(len(negs))]
-                            sims = [[] for _ in range(len(negs))]
-                            not_sims = [[] for _ in range(len(negs))]
-                            mismatches = ([[] for _ in range(len(negs))])
-                    return([(pair[0],pair[1],negs[i], wn_pos[i], sims[i], not_sims[i], mismatches[i]) for i,pair in enumerate(pos_pairs)])
-                    
+                return([(pair[0],pair[1],negs[i], wn_pos[i], sims[i], not_sims[i], mismatches[i]) for i,pair in enumerate(pos_pairs)])
+                
 
     @staticmethod
     #combine all target, context, and negative samples into tensors for each batch
     def collate_fn(batches):
-        all_u = [u for batch in batches for u, _, _, _, _, _, _ in batch if len(batch) > 0]
-        all_v = [v for batch in batches for _, v, _, _, _, _, _ in batch if len(batch) > 0]
-        all_neg = [neg for batch in batches for _, _, neg, _, _, _, _ in batch if len(batch) > 0]
-        all_wn = [wn_pos for batch in batches for _, _, _, wn_pos, _, _, _ in batch if len(batch) > 0]
+        if batches:
+            batches = [batch for batch in batches if batch and len(batch) > 0]
+            
+            all_u = [u for batch in batches for u, _, _, _, _, _, _ in batch]
+            all_v = [v for batch in batches for _, v, _, _, _, _, _ in batch]
+            all_neg = [neg for batch in batches for _, _, neg, _, _, _, _ in batch]
+            all_wn = [wn_pos for batch in batches for _, _, _, wn_pos, _, _, _ in batch ]
+            
+            #pad with zeros for conversion to tensors,must be at least length 2 to preserve tensor math
+            all_sim = [sim for batch in batches for _, _, _, _, sim, _, _ in batch]
+            sim_len = max([2,max([len(i) for i in all_sim])])
+            all_sim = [i+([0]*(sim_len-len(i))) for i in all_sim]
+            
+            all_not_sim = [not_sim for batch in batches for _, _, _, _, _, not_sim, _ in batch]
+            not_sim_len = max([2,max([len(i) for i in all_not_sim])])
+            all_not_sim = [i+([0]*(not_sim_len-len(i))) for i in all_not_sim]
+            
+            all_mismatch = [mismatch for batch in batches for _, _, _, _, _, _, mismatch in batch]
+            mismatch_len = max([2,max([len(i) for i in all_mismatch])])
+            all_mismatch = [i+([0]*(mismatch_len-len(i))) for i in all_mismatch]
+            
+            
+            t_all_u=torch.LongTensor(all_u)
+            t_all_v=torch.LongTensor(all_v)
+            t_all_neg=torch.LongTensor(all_neg)
+            t_all_wn=torch.LongTensor(all_wn)
+            t_all_sim=torch.LongTensor(all_sim)
+            t_all_not_sim=torch.LongTensor(all_not_sim)
+            t_all_mismatch=torch.LongTensor(all_mismatch)
         
-        #pad with zeros for conversion to tensors,must be at least length 2 to preserve tensor math
-        all_sim = [sim for batch in batches for _, _, _, _, sim, _, _ in batch if len(batch) > 0]
-        sim_len = max([2,max([len(i) for i in all_sim])])
-        all_sim = [i+([0]*(sim_len-len(i))) for i in all_sim]
+            return(t_all_u, t_all_v, t_all_neg, t_all_wn, t_all_sim, t_all_not_sim, t_all_mismatch)
         
-        all_not_sim = [not_sim for batch in batches for _, _, _, _, _, not_sim, _ in batch if len(batch) > 0]
-        not_sim_len = max([2,max([len(i) for i in all_not_sim])])
-        all_not_sim = [i+([0]*(not_sim_len-len(i))) for i in all_not_sim]
-        
-        all_mismatch = [mismatch for batch in batches for _, _, _, _, _, _, mismatch in batch if len(batch) > 0]
-        mismatch_len = max([2,max([len(i) for i in all_mismatch])])
-        all_mismatch = [i+([0]*(mismatch_len-len(i))) for i in all_mismatch]
-        
-        
-        t_all_u=torch.LongTensor(all_u)
-        t_all_v=torch.LongTensor(all_v)
-        t_all_neg=torch.LongTensor(all_neg)
-        t_all_wn=torch.LongTensor(all_wn)
-        t_all_sim=torch.LongTensor(all_sim)
-        t_all_not_sim=torch.LongTensor(all_not_sim)
-        t_all_mismatch=torch.LongTensor(all_mismatch)
-        
-        return(t_all_u, t_all_v, t_all_neg, t_all_wn, t_all_sim, t_all_not_sim, t_all_mismatch)
+        else:
+            return(None)
 
 class WordnetFineTuningDataset:
     def __init__(self, data, num_negs, margin_weight):
@@ -584,7 +586,7 @@ class Word2VecWordnetTrainer:
         else:
             self.pretrained = False
             dataset = Word2VecWordnetDataset(self.data, window_size, wn_negative_sample, wn_positive_sample)
-            self.dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = False, num_workers = num_workers,
+            self.dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = True, num_workers = num_workers,
                                          collate_fn = dataset.collate_fn)
             
             self.batch_size = batch_size
@@ -604,7 +606,7 @@ class Word2VecWordnetTrainer:
             
             self.ft_dataset = WordnetFineTuningDataset(self.data, self.ft_num_negs, self.ft_margin_weight)
             self.ft_batch_size = int(len(self.data.wn_synset2id)/1000)#change back to 300?
-            self.ft_dataloader = DataLoader(self.ft_dataset, batch_size = self.ft_batch_size, shuffle = False, num_workers = 0,
+            self.ft_dataloader = DataLoader(self.ft_dataset, batch_size = self.ft_batch_size, shuffle = True, num_workers = 0,
                                    collate_fn = self.ft_dataset.collate_fn)
             self.ft_model = WordnetFineTuning(self.data.wn_id2synset, self.data.wn_synset2word,
                                               self.ft_num_negs, self.ft_margin_weight, self.vocab_size, self.emb_dimension)
@@ -622,7 +624,7 @@ class Word2VecWordnetTrainer:
             #scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(self.dataloader))
             
             for i, batch in enumerate(self.dataloader):
-                if len(batch[0])>1:
+                if batch and len(batch[0])>1:
                     u = batch[0].to(self.device)
                     v = batch[1].to(self.device)
                     neg = batch[2].to(self.device)
