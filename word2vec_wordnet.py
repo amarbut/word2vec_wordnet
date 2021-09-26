@@ -654,7 +654,7 @@ class Word2VecWordnetTrainer:
             
             # set initial learning rate at 1/10 skipgram rate--encourage small adjustments to pre-trained embeddings
             ft_optimizer = optim.SparseAdam(self.ft_model.parameters(), lr = (self.initial_lr/10))
-            #ft_scheduler = optim.lr_scheduler.CosineAnnealingLR(ft_optimizer, len(self.ft_dataloader))
+            ft_scheduler = optim.lr_scheduler.CosineAnnealingLR(ft_optimizer, len(self.ft_dataloader))
             
             for i, batch in enumerate(self.ft_dataloader):
                 syn_words = batch[0].to(self.device)
@@ -668,8 +668,10 @@ class Word2VecWordnetTrainer:
                                 
                 if i % 100 == 0:
                     print((i/len(self.ft_dataloader))*100,"% Loss:", loss.item())
-                # if i % 1000 == 0:
-                #     ft_scheduler.step()                    
+            
+            #update learning rate every 5 epochs (based on leveling of loss w/ no scheduler ~5 epochs)
+            if (epoch +1) % 5 == 0:
+                ft_scheduler.step()                    
         
 
              
