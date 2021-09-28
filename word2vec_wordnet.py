@@ -605,8 +605,8 @@ class Word2VecWordnetTrainer:
             self.ft_epochs = ft_epochs
             
             self.ft_dataset = WordnetFineTuningDataset(self.data, self.ft_num_negs, self.ft_margin_weight)
-            self.ft_batch_size = int(len(self.data.wn_synset2id)/1000)#change back to 300?
-            self.ft_dataloader = DataLoader(self.ft_dataset, batch_size = self.ft_batch_size, shuffle = True, num_workers = 0,
+            self.ft_batch_size = int(len(self.data.wn_synset2id)/1000)
+            self.ft_dataloader = DataLoader(self.ft_dataset, batch_size = self.ft_batch_size, shuffle = True, num_workers = num_workers,
                                    collate_fn = self.ft_dataset.collate_fn)
             self.ft_model = WordnetFineTuning(self.data.wn_id2synset, self.data.wn_synset2word,
                                               self.ft_num_negs, self.ft_margin_weight, self.vocab_size, self.emb_dimension)
@@ -666,7 +666,7 @@ class Word2VecWordnetTrainer:
                 loss.backward()
                 ft_optimizer.step()
                                 
-                if i % 100 == 0:
+                if i % 10 == 0:
                     print((i/len(self.ft_dataloader))*100,"% Loss:", loss.item())
             
             #update learning rate every 5 epochs (based on leveling of loss w/ no scheduler ~5 epochs)
