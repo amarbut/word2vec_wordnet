@@ -466,7 +466,10 @@ class SkipGramWordnetModel(nn.Module):
             # normalized to match pos_loss
             w2v_mismatch_loss = mismatch_weight*(torch.sum(-F.logsigmoid(-w2v_mismatch_loss),dim = 1)).unsqueeze(1)/len(wn[0])
         else:
-            w2v_mismatch_loss = torch.LongTensor([0]*len(u)).unsqueeze(1)
+            #emb_wn should be empty, produce empty loss            
+            w2v_mismatch_loss = torch.bmm(emb_wn,emb_u.unsqueeze(2)).squeeze()
+            #can't normalize to avoid division by 0
+            w2v_mismatch_loss = mismatch_weight*(torch.sum(-F.logsigmoid(-w2v_mismatch_loss),dim = 1)).unsqueeze(1)
         
         #total w2v loss for all target words
         w2v_loss = w2v_pos_loss + w2v_neg_loss + w2v_mismatch_loss
