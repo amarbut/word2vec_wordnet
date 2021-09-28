@@ -437,12 +437,8 @@ class SkipGramWordnetModel(nn.Module):
         
         #replace context and wn padding "word" embeddings with target embedding so not included in loss
         for i in range(len(v)):
-            for j in range(len(v[i])):
-                if v[i][j] == 0:
-                    emb_v[i][j] = emb_u[i]
-            for k in range(len(wn[i])):
-                if wn[i][k] == 0:
-                    emb_wn[i][k] = emb_u[i]
+            emb_v[i][v[i] == 0] = emb_u[i]
+            emb_wn[i][wn[i] == 0] = emb_u[i]
         
         #calculate dot product for target and all context words
         w2v_pos_loss = torch.bmm(emb_v,emb_u.unsqueeze(2)).squeeze()
@@ -483,15 +479,9 @@ class SkipGramWordnetModel(nn.Module):
             
             #replace padding "word" embeddings with target word embeddings so not included in loss
             for i in range(len(u)):
-                for j in range(len(sim[i])):
-                    if sim[i][j] == 0:
-                        emb_sim[i][j] = emb_u[i]
-                for k in range(len(not_sim[i])):
-                    if not_sim[i][k] == 0:
-                        emb_not_sim[i][k] = emb_u[i]
-                for l in range(len(emb_mismatch[i])):
-                    if mismatch[i][l] == 0:
-                        emb_mismatch[i][l] = emb_u[i]
+                emb_sim[i][sim[i] == 0] = emb_u[i]
+                emb_not_sim[i][not_sim[i] == 0] = emb_u[i]
+                emb_mismatch[i][mismatch[i]==0] = emb_u[i]
             
             #compute euclidean distance
             wn_pos_dist = torch.sqrt(torch.sum(((emb_u.unsqueeze(1)-emb_sim.unsqueeze(0))**2).squeeze(1), dim =3) + 1e-9).squeeze()
@@ -568,9 +558,7 @@ class WordnetFineTuning(nn.Module):
         
         #set padding "word" embedding to corresponding centroid so that distance is not included in loss
         for i in range(len(syn_words)):
-            for j in range(len(syn_words[i])):
-                if syn_words[i][j] == 0:
-                    syn_embeddings[i][j] = syn_centroids[i]
+            syn_embeddings[i][syn_words[i] == 0] = syn_centroids[i]
         
         #compute distance between centroid and synset group members
         syn_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1)-syn_embeddings.unsqueeze(0))**2, dim = 3).squeeze() + 1e-9)
