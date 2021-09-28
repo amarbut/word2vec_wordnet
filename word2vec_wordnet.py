@@ -435,15 +435,13 @@ class SkipGramWordnetModel(nn.Module):
         emb_neg = self.v_embeddings(neg)
         emb_wn = self.v_embeddings(wn)
         
-        #replace context and wn padding "word" embeddings with target embedding so not included in loss
-        for i in range(len(v)):
-            emb_v[i][v[i] == 0] = emb_u[i]
-            emb_wn[i][wn[i] == 0] = emb_u[i]
-        
+       
         #calculate dot product for target and all context words
         w2v_pos_loss = torch.bmm(emb_v,emb_u.unsqueeze(2)).squeeze()
+        #disinclude padding "word" loss
+        w2v_pos_loss[v != 0] = -F.logsigmoid(w2v_pos_loss[v != 0])
         #use loss function from w2v paper
-        w2v_pos_loss = torch.sum(-F.logsigmoid(w2v_pos_loss), dim = 1).unsqueeze(1)
+        w2v_pos_loss = torch.sum(w2v_pos_loss, dim = 1).unsqueeze(1)
 
         #normalize by number of non-padding "words" in context
         v_mask = v != 0
@@ -458,9 +456,11 @@ class SkipGramWordnetModel(nn.Module):
         if self.wn_negative_sample:
             #calculate dot product for target and all wn_positive(w2v negative) sample words
             w2v_mismatch_loss = torch.bmm(emb_wn,emb_u.unsqueeze(2)).squeeze()
+            #exclude padding "word" loss
+            w2v_mismatch_loss[wn != 0] = -F.logsigmoid(-w2v_mismatch_loss[wn != 0])
             # use loss function from w2v paper, downweighted so not in competition with positive wn similarity loss
             # normalized to match pos_loss
-            w2v_mismatch_loss = mismatch_weight*(torch.sum(-F.logsigmoid(-w2v_mismatch_loss),dim = 1)).unsqueeze(1)/len(wn[0])
+            w2v_mismatch_loss = mismatch_weight*(torch.sum(w2v_mismatch_loss,dim = 1)).unsqueeze(1)/len(wn[0])
         else:
             #emb_wn should be empty, produce empty loss            
             w2v_mismatch_loss = torch.bmm(emb_wn,emb_u.unsqueeze(2)).squeeze()
@@ -477,30 +477,33 @@ class SkipGramWordnetModel(nn.Module):
             emb_not_sim = self.v_embeddings(not_sim)
             emb_mismatch = self.v_embeddings(mismatch)
             
-            #replace padding "word" embeddings with target word embeddings so not included in loss
-            for i in range(len(u)):
-                emb_sim[i][sim[i] == 0] = emb_u[i]
-                emb_not_sim[i][not_sim[i] == 0] = emb_u[i]
-                emb_mismatch[i][mismatch[i]==0] = emb_u[i]
-            
             #compute euclidean distance
             wn_pos_dist = torch.sqrt(torch.sum(((emb_u.unsqueeze(1)-emb_sim.unsqueeze(0))**2).squeeze(1), dim =3) + 1e-9).squeeze()
             wn_neg_dist = torch.sqrt(torch.sum((emb_u.unsqueeze(1)-emb_not_sim.unsqueeze(0))**2, dim =3) + 1e-9).squeeze()
             wn_mismatch_dist = torch.sqrt(torch.sum((emb_u.unsqueeze(1)-emb_mismatch.unsqueeze(0))**2, dim =3) + 1e-9).squeeze()
             
+            #ignore padding "word" distances
+            wn_pos_dist2 = torch.clone(wn_pos_dist)
+            wn_neg_dist2 = torch.clone(wn_neg_dist)
+            wn_mismatch_dist2 = torch.clone(wn_mismatch_dist)
+            
+            
+            wn_pos_dist2[sim == 0] -= wn_pos_dist[sim == 0]
+            wn_neg_dist2[not_sim == 0] -= wn_neg_dist[not_sim == 0]
+            wn_mismatch_dist2[mismatch == 0] -= wn_mismatch_dist[mismatch == 0]
                        
             #for dissimilar words: replace distance with 0 if larger than contrastive loss margin, or difference from margin if not 
-            wn_neg_dist = margin - wn_neg_dist
-            wn_neg_dist[wn_neg_dist<0] = 0
+            wn_neg_dist2 = margin - wn_neg_dist2
+            wn_neg_dist2[wn_neg_dist2<0] = 0
             
-            wn_mismatch_dist = margin - wn_mismatch_dist
-            wn_mismatch_dist[wn_mismatch_dist<0] = 0
+            wn_mismatch_dist2 = margin - wn_mismatch_dist2
+            wn_mismatch_dist2[wn_mismatch_dist2<0] = 0
             
             #use distances in contrastive loss function
-            wn_pos_loss = torch.sum(0.5*(wn_pos_dist**2),1).unsqueeze(1)
-            wn_neg_loss = torch.sum(0.5*(wn_neg_dist**2),1).unsqueeze(1)
+            wn_pos_loss = torch.sum(0.5*(wn_pos_dist2**2),1).unsqueeze(1)
+            wn_neg_loss = torch.sum(0.5*(wn_neg_dist2**2),1).unsqueeze(1)
             #downweight loss from dissimilar words in word2vec context so not competing
-            wn_mismatch_loss = mismatch_weight*(torch.sum(0.5*(wn_mismatch_dist**2),1).unsqueeze(1))
+            wn_mismatch_loss = mismatch_weight*(torch.sum(0.5*(wn_mismatch_dist2**2),1).unsqueeze(1))
             
             #normalize all loss by number of non-padding "words"
             sim_mask= (sim != 0).sum(dim = 1).unsqueeze(1)
@@ -556,12 +559,10 @@ class WordnetFineTuning(nn.Module):
         #use average embedding for non-padding "words" as synset centroid
         syn_centroids = torch.sum(syn_embeddings, dim = 1)/syn_mask1.sum(dim = 1)
         
-        #set padding "word" embedding to corresponding centroid so that distance is not included in loss
-        for i in range(len(syn_words)):
-            syn_embeddings[i][syn_words[i] == 0] = syn_centroids[i]
-        
         #compute distance between centroid and synset group members
         syn_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1)-syn_embeddings.unsqueeze(0))**2, dim = 3).squeeze() + 1e-9)
+        #ignore padding "word" distances
+        syn_dist[syn_words == 0] -= syn_dist[syn_words == 0]
         #use contrastive loss to move all words in synset group closer; normalized for number of non-padding words
         syn_pos_loss = torch.sum(0.5*(syn_dist**2),1)/syn_mask2.sum(dim=1)
         
@@ -667,6 +668,7 @@ class Word2VecWordnetTrainer:
             
     def w2v_train(self):
         print("training on cuda: ", self.use_cuda)
+        #torch.autograd.set_detect_anomaly(True)
         for epoch in range(self.epochs):
             
             print('\nStarting Epoch', (epoch+1))
