@@ -253,42 +253,49 @@ class Word2VecWordnetDataset:
                             #skip if target word doesn't have synset in vocabulary
                             if u in self.data.wn_word2synset:
                                 #gets similar words
-                                syns = [s for ss in self.data.wn_word2synset[u] for s in self.data.wn_synset2word[ss]]
-                                
-                                #select similar words based on negative sampling probs
-                                syn_probs = np.array([self.data.negative_probs[i] for i in syns])
-                                syn_norm = syn_probs/sum(syn_probs)
-                                
-                                wn_pos_ids = np.random.choice(syns, boundary*2, p = syn_norm)
-                                neg_ids = self.data.get_negatives(pos, 4, boundary*2)
-    
-                                wn_pos.append(wn_pos_ids)
-                                negs.append(neg_ids)
-                       
-                            #sort context and neg sample words by wordnet similarity to target
-                                sim = list(wn_pos_ids)
-                                w2v_mismatch = []
-                                not_sim = []
-                                for j in v:
-                                    #skip padded cells
-                                    if j != 0 and j in self.data.wn_word2synset:
-                                        #mark as similar if u and j share any synset groups
-                                        if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[j]) < len(self.data.wn_word2synset[u]):
-                                            sim.append(j)
-                                        else:
-                                            w2v_mismatch.append(j)
-                                for k in neg_ids:
-                                    #skip padded cells in tensors
-                                    if k != 0 and k in self.data.wn_word2synset:
-                                        #mark as similar if u and k share any synset groups
-                                        if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[k]) < len(self.data.wn_word2synset[u]):
-                                            sim.append(k)
-                                        else:
-                                            not_sim.append(k)
-                                
-                                sims.append(sim)
-                                not_sims.append(not_sim)
-                                mismatches.append(w2v_mismatch)
+                                syns = [s for ss in self.data.wn_word2synset[u] for s in self.data.wn_synset2word[ss] if s != u]
+                                #skip if no synonyms in vocabulary
+                                if len(syns) >0:
+                                    #select similar words based on negative sampling probs
+                                    syn_probs = np.array([self.data.negative_probs[i] for i in syns])
+                                    syn_norm = syn_probs/sum(syn_probs)
+                                    
+                                    wn_pos_ids = np.random.choice(syns, boundary*2, p = syn_norm)
+                                    neg_ids = self.data.get_negatives(pos, 4, boundary*2)
+        
+                                    wn_pos.append(wn_pos_ids)
+                                    negs.append(neg_ids)
+                           
+                                #sort context and neg sample words by wordnet similarity to target
+                                    sim = list(wn_pos_ids)
+                                    w2v_mismatch = []
+                                    not_sim = []
+                                    for j in v:
+                                        #skip padded cells
+                                        if j != 0 and j in self.data.wn_word2synset:
+                                            #mark as similar if u and j share any synset groups
+                                            if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[j]) < len(self.data.wn_word2synset[u]):
+                                                sim.append(j)
+                                            else:
+                                                w2v_mismatch.append(j)
+                                    for k in neg_ids:
+                                        #skip padded cells in tensors
+                                        if k != 0 and k in self.data.wn_word2synset:
+                                            #mark as similar if u and k share any synset groups
+                                            if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[k]) < len(self.data.wn_word2synset[u]):
+                                                sim.append(k)
+                                            else:
+                                                not_sim.append(k)
+                                    
+                                    sims.append(sim)
+                                    not_sims.append(not_sim)
+                                    mismatches.append(w2v_mismatch)
+                                else:
+                                    negs.append(self.data.get_negatives(pos, 4, boundary*2))
+                                    wn_pos.append([0]*boundary*2)
+                                    sims.append([])
+                                    not_sims.append([])
+                                    mismatches.append([])
                             else:
                                 negs.append(self.data.get_negatives(pos, 4, boundary*2))
                                 wn_pos.append([0]*boundary*2)
@@ -428,20 +435,38 @@ class SkipGramWordnetModel(nn.Module):
         emb_neg = self.v_embeddings(neg)
         emb_wn = self.v_embeddings(wn)
         
+        #replace context and wn padding "word" embeddings with target embedding so not included in loss
+        for i in range(len(v)):
+            for j in range(len(v[i])):
+                if v[i][j] == 0:
+                    emb_v[i][j] = emb_u[i]
+            for k in range(len(wn[i])):
+                if wn[i][k] == 0:
+                    emb_wn[i][k] = emb_u[i]
+        
         #calculate dot product for target and all context words
         w2v_pos_loss = torch.bmm(emb_v,emb_u.unsqueeze(2)).squeeze()
         #use loss function from w2v paper
         w2v_pos_loss = torch.sum(-F.logsigmoid(w2v_pos_loss), dim = 1).unsqueeze(1)
+
+        #normalize by number of non-padding "words" in context
+        v_mask = v != 0
+        w2v_pos_loss /= v_mask.sum(dim = 1).unsqueeze(1)
         
         #calculate dot product for target and all negative sample words
         w2v_neg_loss = torch.bmm(emb_neg,emb_u.unsqueeze(2)).squeeze()
-        #use loss function from w2v paper
-        w2v_neg_loss = torch.sum(-F.logsigmoid(-w2v_neg_loss), dim = 1).unsqueeze(1)
+        #use loss function from w2v paper 
+        #normalized to match with pos_loss
+        w2v_neg_loss = torch.sum(-F.logsigmoid(-w2v_neg_loss), dim = 1).unsqueeze(1)/len(neg[0])
         
-        #calculate dot product for target and all wn_positive(w2v negative) sample words
-        w2v_mismatch_loss = torch.bmm(emb_wn,emb_u.unsqueeze(2)).squeeze()
-        # use loss function from w2v paper, downweighted so not in competition with positive wn similarity loss
-        w2v_mismatch_loss = mismatch_weight*(torch.sum(-F.logsigmoid(-w2v_mismatch_loss),dim = 1)).unsqueeze(1)
+        if self.wn_negative_sample:
+            #calculate dot product for target and all wn_positive(w2v negative) sample words
+            w2v_mismatch_loss = torch.bmm(emb_wn,emb_u.unsqueeze(2)).squeeze()
+            # use loss function from w2v paper, downweighted so not in competition with positive wn similarity loss
+            # normalized to match pos_loss
+            w2v_mismatch_loss = mismatch_weight*(torch.sum(-F.logsigmoid(-w2v_mismatch_loss),dim = 1)).unsqueeze(1)/len(wn[0])
+        else:
+            w2v_mismatch_loss = torch.LongTensor([0]*len(u)).unsqueeze(1)
         
         #total w2v loss for all target words
         w2v_loss = w2v_pos_loss + w2v_neg_loss + w2v_mismatch_loss
@@ -453,11 +478,22 @@ class SkipGramWordnetModel(nn.Module):
             emb_not_sim = self.v_embeddings(not_sim)
             emb_mismatch = self.v_embeddings(mismatch)
             
+            #replace padding "word" embeddings with target word embeddings so not included in loss
+            for i in range(len(u)):
+                for j in range(len(sim[i])):
+                    if sim[i][j] == 0:
+                        emb_sim[i][j] = emb_u[i]
+                for k in range(len(not_sim[i])):
+                    if not_sim[i][k] == 0:
+                        emb_not_sim[i][k] = emb_u[i]
+                for l in range(len(emb_mismatch[i])):
+                    if mismatch[i][l] == 0:
+                        emb_mismatch[i][l] = emb_u[i]
             
             #compute euclidean distance
-            wn_pos_dist = torch.sqrt(torch.sum(((emb_u.unsqueeze(1)-emb_sim.unsqueeze(0))**2).squeeze(1), dim =3)).squeeze()
-            wn_neg_dist = torch.sqrt(torch.sum((emb_u.unsqueeze(1)-emb_not_sim.unsqueeze(0))**2, dim =3)).squeeze()
-            wn_mismatch_dist = torch.sqrt(torch.sum((emb_u.unsqueeze(1)-emb_mismatch.unsqueeze(0))**2, dim =3)).squeeze()
+            wn_pos_dist = torch.sqrt(torch.sum(((emb_u.unsqueeze(1)-emb_sim.unsqueeze(0))**2).squeeze(1), dim =3) + 1e-9).squeeze()
+            wn_neg_dist = torch.sqrt(torch.sum((emb_u.unsqueeze(1)-emb_not_sim.unsqueeze(0))**2, dim =3) + 1e-9).squeeze()
+            wn_mismatch_dist = torch.sqrt(torch.sum((emb_u.unsqueeze(1)-emb_mismatch.unsqueeze(0))**2, dim =3) + 1e-9).squeeze()
             
                        
             #for dissimilar words: replace distance with 0 if larger than contrastive loss margin, or difference from margin if not 
@@ -472,6 +508,16 @@ class SkipGramWordnetModel(nn.Module):
             wn_neg_loss = torch.sum(0.5*(wn_neg_dist**2),1).unsqueeze(1)
             #downweight loss from dissimilar words in word2vec context so not competing
             wn_mismatch_loss = mismatch_weight*(torch.sum(0.5*(wn_mismatch_dist**2),1).unsqueeze(1))
+            
+            #normalize all loss by number of non-padding "words"
+            sim_mask= (sim != 0).sum(dim = 1).unsqueeze(1)
+            not_sim_mask = (not_sim != 0).sum(dim = 1).unsqueeze(1)
+            mismatch_mask = (mismatch != 0).sum(dim = 1).unsqueeze(1)
+        
+            
+            wn_pos_loss[sim_mask != 0] /= sim_mask[sim_mask != 0]
+            wn_neg_loss[not_sim_mask != 0] /= not_sim_mask[not_sim_mask != 0]
+            wn_mismatch_loss[mismatch_mask != 0] /= mismatch_mask[mismatch_mask != 0]
             
             #combine wn_pos_loss, wn_neg_loss, wn_mismatch
             wn_loss = wn_pos_loss + wn_neg_loss + wn_mismatch_loss
@@ -510,26 +556,39 @@ class WordnetFineTuning(nn.Module):
         neg_embeddings = self.embeddings(neg_words)
       
         #use mean of all synset group member embeddings as synset centroid
-        #use mask to ignore padding "words" (all 0 values)
-        syn_mask = syn_embeddings != 0
-        syn_centroids = torch.sum(syn_embeddings, dim = 1)/syn_mask.sum(dim = 1)
+        #create mask to ignore padding "words" (all 0 values)
+        syn_mask1 = syn_embeddings != 0
+        syn_mask2 = syn_words != 0
+        
+        #use average embedding for non-padding "words" as synset centroid
+        syn_centroids = torch.sum(syn_embeddings, dim = 1)/syn_mask1.sum(dim = 1)
+        
+        #set padding "word" embedding to corresponding centroid so that distance is not included in loss
+        for i in range(len(syn_words)):
+            for j in range(len(syn_words[i])):
+                if syn_words[i][j] == 0:
+                    syn_embeddings[i][j] = syn_centroids[i]
+        
         #compute distance between centroid and synset group members
         syn_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1)-syn_embeddings.unsqueeze(0))**2, dim = 3).squeeze() + 1e-9)
-        #use contrastive loss to move all words in synset group closer
-        syn_pos_loss = torch.sum(0.5*(syn_dist**2),1)
+        #use contrastive loss to move all words in synset group closer; normalized for number of non-padding words
+        syn_pos_loss = torch.sum(0.5*(syn_dist**2),1)/syn_mask2.sum(dim=1)
         
-        #use mean of all synset group member embeddings as neg synset group centroid
+        
         #use mask to ignore padding "words" (all 0 values)
         neg_mask = neg_embeddings != 0
+        
+        #use mean of all synset group member embeddings as neg synset group centroid (ignoring padding)
         neg_centroids = torch.sum(neg_embeddings, dim = 2)/neg_mask.sum(dim = 2)
+        
         #compute distance between neg group centroids and target group centroids
         neg_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1) - neg_centroids.unsqueeze(0))**2, dim = 3).squeeze() + 1e-9)
         
         #replace neg_dist with difference from margin or 0 if outside of margin
         neg_dist = torch.sub(margins, neg_dist)
         neg_dist[neg_dist<0] = 0
-        #use distances in contrastive loss function
-        neg_loss = torch.sum(0.5*(neg_dist**2),1)
+        #use distances in contrastive loss function; normalized by number of neg samples (to better match pos loss)
+        neg_loss = torch.sum(0.5*(neg_dist**2),1)/len(neg_centroids[0])
         
         loss = syn_pos_loss + neg_loss
         return(torch.mean(loss))
@@ -643,7 +702,6 @@ class Word2VecWordnetTrainer:
                     # if i % 10000 == 0:
                     #     scheduler.step()
 
-        
         self.model.save_embeddings(self.data.id2word, self.model_dir)        
 
                     
@@ -666,7 +724,7 @@ class Word2VecWordnetTrainer:
                 loss.backward()
                 ft_optimizer.step()
                                 
-                if i % 10 == 0:
+                if i % 25 == 0:
                     print((i/len(self.ft_dataloader))*100,"% Loss:", loss.item())
             
             #update learning rate every 5 epochs (based on leveling of loss w/ no scheduler ~5 epochs)
