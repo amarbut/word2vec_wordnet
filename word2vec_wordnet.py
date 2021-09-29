@@ -487,23 +487,22 @@ class SkipGramWordnetModel(nn.Module):
             wn_neg_dist2 = torch.clone(wn_neg_dist)
             wn_mismatch_dist2 = torch.clone(wn_mismatch_dist)
             
-            
-            wn_pos_dist2[sim == 0] -= wn_pos_dist[sim == 0]
-            wn_neg_dist2[not_sim == 0] -= wn_neg_dist[not_sim == 0]
-            wn_mismatch_dist2[mismatch == 0] -= wn_mismatch_dist[mismatch == 0]
+            wn_pos_dist[sim == 0] -= wn_pos_dist2[sim == 0]
+            wn_neg_dist[not_sim == 0] -= wn_neg_dist2[not_sim == 0]
+            wn_mismatch_dist[mismatch == 0] -= wn_mismatch_dist2[mismatch == 0]
                        
             #for dissimilar words: replace distance with 0 if larger than contrastive loss margin, or difference from margin if not 
-            wn_neg_dist2 = margin - wn_neg_dist2
-            wn_neg_dist2[wn_neg_dist2<0] = 0
+            wn_neg_dist = margin - wn_neg_dist
+            wn_neg_dist[wn_neg_dist<0] = 0
             
-            wn_mismatch_dist2 = margin - wn_mismatch_dist2
-            wn_mismatch_dist2[wn_mismatch_dist2<0] = 0
+            wn_mismatch_dist = margin - wn_mismatch_dist
+            wn_mismatch_dist[wn_mismatch_dist<0] = 0
             
             #use distances in contrastive loss function
-            wn_pos_loss = torch.sum(0.5*(wn_pos_dist2**2),1).unsqueeze(1)
-            wn_neg_loss = torch.sum(0.5*(wn_neg_dist2**2),1).unsqueeze(1)
+            wn_pos_loss = torch.sum(0.5*(wn_pos_dist**2),1).unsqueeze(1)
+            wn_neg_loss = torch.sum(0.5*(wn_neg_dist**2),1).unsqueeze(1)
             #downweight loss from dissimilar words in word2vec context so not competing
-            wn_mismatch_loss = mismatch_weight*(torch.sum(0.5*(wn_mismatch_dist2**2),1).unsqueeze(1))
+            wn_mismatch_loss = mismatch_weight*(torch.sum(0.5*(wn_mismatch_dist**2),1).unsqueeze(1))
             
             #normalize all loss by number of non-padding "words"
             sim_mask= (sim != 0).sum(dim = 1).unsqueeze(1)
@@ -562,7 +561,8 @@ class WordnetFineTuning(nn.Module):
         #compute distance between centroid and synset group members
         syn_dist = torch.sqrt(torch.sum((syn_centroids.unsqueeze(1)-syn_embeddings.unsqueeze(0))**2, dim = 3).squeeze() + 1e-9)
         #ignore padding "word" distances
-        syn_dist[syn_words == 0] -= syn_dist[syn_words == 0]
+        syn_dist2 = torch.clone(syn_dist)
+        syn_dist[syn_words == 0] -= syn_dist2[syn_words == 0]
         #use contrastive loss to move all words in synset group closer; normalized for number of non-padding words
         syn_pos_loss = torch.sum(0.5*(syn_dist**2),1)/syn_mask2.sum(dim=1)
         
