@@ -381,7 +381,7 @@ class WordnetFineTuningDataset:
         neg_syns = [self.wn_id2synset[n] for n in negs]
         
         #use wn distance between target synset and neg synset to set contrastive loss margins
-        margins = [self.margin_weight*(min((wn.synset(syn).shortest_path_distance(wn.synset(neg)) or 10),10)) for neg in neg_syns]
+        margins = [int(self.margin_weight*(min((wn.synset(syn).shortest_path_distance(wn.synset(neg)) or 10),10))) for neg in neg_syns]
         
         return {'margins': margins, 'syn_words':syn_words, 'neg_words':neg_words}
     
