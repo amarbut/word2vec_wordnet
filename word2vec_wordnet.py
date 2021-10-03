@@ -701,6 +701,7 @@ class Word2VecWordnetTrainer:
                     
     def wn_ft(self):
         self.ft_model.embeddings.weight.data.copy_(self.model.u_embeddings.weight.data)
+        self.ft_model.to(self.device)
         for epoch in range(self.ft_epochs):
             print("Starting Epoch:", (epoch+1))
             
