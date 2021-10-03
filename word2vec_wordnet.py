@@ -674,7 +674,7 @@ class Word2VecWordnetTrainer:
             
             print('\nStarting Epoch', (epoch+1))
             optimizer = optim.SparseAdam(self.model.parameters(), lr = self.initial_lr)
-            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(self.dataloader))
+            scheduler = optim.lr_scheduler.StepLR(optimizer, step_size = 25000, gamma = 0.5)
             
             for i, batch in enumerate(self.dataloader):
                 if batch and len(batch[0])>1:
@@ -693,8 +693,9 @@ class Word2VecWordnetTrainer:
                     
                     if i % 100 == 0:
                         print((i/len(self.dataloader))*100,"% Loss:", loss.item())
-                    if i % 25000 == 0: #based on loss leveling ~5% on full dataset
-                        scheduler.step()
+                    # if i % 25000 == 0: #based on loss leveling ~5% on full dataset
+                    #     scheduler.step()
+                    scheduler.step()
 
         self.model.save_embeddings(self.data.id2word, self.model_dir)        
 
@@ -706,8 +707,8 @@ class Word2VecWordnetTrainer:
             print("Starting Epoch:", (epoch+1))
             
             # set initial learning rate at 1/10 skipgram rate--encourage small adjustments to pre-trained embeddings
-            ft_optimizer = optim.SparseAdam(self.ft_model.parameters(), lr = (self.initial_lr/10))
-            ft_scheduler = optim.lr_scheduler.CosineAnnealingLR(ft_optimizer, len(self.ft_dataloader))
+            ft_optimizer = optim.SparseAdam(self.ft_model.parameters(), lr = self.initial_lr)
+            ft_scheduler = optim.lr_scheduler.StepLR(ft_optimizer, step_size = 5, gamma = 0.1)
             
             for i, batch in enumerate(self.ft_dataloader):
                 syn_words = batch[0].to(self.device)
@@ -723,8 +724,9 @@ class Word2VecWordnetTrainer:
                     print((i/len(self.ft_dataloader))*100,"% Loss:", loss.item())
             
             #update learning rate every 5 epochs (based on leveling of loss w/ no scheduler ~5 epochs)
-            if (epoch +1) % 5 == 0:
-                ft_scheduler.step()                    
+            # if (epoch +1) % 5 == 0:
+            #     ft_scheduler.step()  
+            ft_scheduler.step()                  
         
 
              
