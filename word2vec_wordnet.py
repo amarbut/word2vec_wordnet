@@ -669,12 +669,13 @@ class Word2VecWordnetTrainer:
             
     def w2v_train(self):
         print("training on cuda: ", self.use_cuda)
+        
+        optimizer = optim.SparseAdam(self.model.parameters(), lr = self.initial_lr)
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size = 25000, gamma = 0.5)
         #torch.autograd.set_detect_anomaly(True)
         for epoch in range(self.epochs):
             
             print('\nStarting Epoch', (epoch+1))
-            optimizer = optim.SparseAdam(self.model.parameters(), lr = self.initial_lr)
-            scheduler = optim.lr_scheduler.StepLR(optimizer, step_size = 25000, gamma = 0.5)
             
             for i, batch in enumerate(self.dataloader):
                 if batch and len(batch[0])>1:
@@ -703,13 +704,13 @@ class Word2VecWordnetTrainer:
     def wn_ft(self):
         self.ft_model.embeddings.weight.data.copy_(self.model.u_embeddings.weight.data)
         self.ft_model.to(self.device)
+        # set initial learning rate at 1/10 skipgram rate--encourage small adjustments to pre-trained embeddings
+        ft_optimizer = optim.SparseAdam(self.ft_model.parameters(), lr = self.initial_lr)
+        ft_scheduler = optim.lr_scheduler.StepLR(ft_optimizer, step_size = 5, gamma = 0.1)
+        
         for epoch in range(self.ft_epochs):
             print("Starting Epoch:", (epoch+1))
-            
-            # set initial learning rate at 1/10 skipgram rate--encourage small adjustments to pre-trained embeddings
-            ft_optimizer = optim.SparseAdam(self.ft_model.parameters(), lr = self.initial_lr)
-            ft_scheduler = optim.lr_scheduler.StepLR(ft_optimizer, step_size = 5, gamma = 0.1)
-            
+                        
             for i, batch in enumerate(self.ft_dataloader):
                 syn_words = batch[0].to(self.device)
                 neg_words = batch[1].to(self.device)
