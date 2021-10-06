@@ -671,8 +671,8 @@ class Word2VecWordnetTrainer:
         print("training on cuda: ", self.use_cuda)
         
         optimizer = optim.SparseAdam(self.model.parameters(), lr = self.initial_lr)
-        #scheduler = optim.lr_scheduler.StepLR(optimizer, step_size = 25000, gamma = 0.5)
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(self.dataloader))
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size = 25000, gamma = 0.5)
+        # scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, len(self.dataloader))
         #torch.autograd.set_detect_anomaly(True)
         for epoch in range(self.epochs):
             
@@ -695,9 +695,9 @@ class Word2VecWordnetTrainer:
                     
                     if i % 100 == 0:
                         print((i/len(self.dataloader))*100,"% Loss:", loss.item())
-                    if i % 25000 == 0: #based on loss leveling ~5% on full dataset
-                        scheduler.step()
-                    #scheduler.step()
+                    # if i % 25000 == 0: #based on loss leveling ~5% on full dataset
+                    #     scheduler.step()
+                    scheduler.step()
 
         self.model.save_embeddings(self.data.id2word, self.model_dir)        
 
