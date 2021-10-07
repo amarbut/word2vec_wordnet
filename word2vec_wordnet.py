@@ -38,7 +38,8 @@ class DataReader:
         self.wn_synset2id = dict()
         self.wn_id2synset = dict()
         self.wn_synset2word = dict()
-        self.wn_word2synset = dict()        
+        self.wn_word2synset = dict()    
+        self.wn_word2syns = dict()
         self.wn_synset_frequency = dict()
         
         self.wn_negative_probs = []
@@ -88,7 +89,7 @@ class DataReader:
             #One dict for {synset: [members + hyponyms]}, one dict for {word:[synsets]}
             sid = 0
             for word in self.word2id:
-                ss = wn.synsets(word)
+                ss = set(wn.synsets(word))
                 for synset in ss:
                     s = synset.name()
                     sw = s.split(".")[0]
@@ -104,16 +105,19 @@ class DataReader:
                         if self.wn_depth > 1:
                             syns.extend([self.word2id[w.lower()] for h in synset.hyponyms() for hh in h.hyponyms() for w in hh.lemma_names() if w.lower() in self.word2id])
                         
-                        self.wn_synset2id[s] = sid
-                        self.wn_synset2word[sid] = set(syns)
-                        self.wn_id2synset[sid] = s
-                        for syn in syns:
-                            if not syn in self.wn_word2synset:
-                                self.wn_word2synset[syn] = set([sid])
-                            else:
-                                self.wn_word2synset[syn].add(sid)
-                        sid +=1
-                        
+                        #only include synsets with at least two word members
+                        if len(syns) > 1:
+                            self.wn_synset2id[s] = sid
+                            self.wn_synset2word[sid] = set(syns)
+                            self.wn_id2synset[sid] = s
+                            for syn in syns:
+                                if not syn in self.wn_word2synset:
+                                    self.wn_word2synset[syn] = set([sid])
+                                else:
+                                    self.wn_word2synset[syn].add(sid)
+                            sid +=1
+            
+            self.wn_word2syns = {u:[s for ss in self.wn_word2synset[u] for s in self.wn_synset2word[ss]] for u in self.wn_word2synset}            
             self.wn_synset_frequency = {k:sum([self.word_frequency[w] for w in self.wn_synset2word[k]])/self.token_count for k in self.wn_synset2word}
         print("Total unique synsets: ", str(len(self.wn_synset2word)))
 
@@ -232,8 +236,7 @@ class Word2VecWordnetDataset:
                         wn_pairs = []
                         for pos in pos_pairs:
                             u,v = pos
-                            syns = [s for ss in self.data.wn_word2synset[u] for s in self.data.wn_synset2word[ss]]
-                            
+                            syns = self.data.wn_word2syns[u]
                             #subsample wordnet similar words before adding
                             wn_pairs.extend([(s,v) for s in syns
                                                  if np.random.rand() > self.data.subsample_probs[s]])
@@ -253,49 +256,42 @@ class Word2VecWordnetDataset:
                             #skip if target word doesn't have synset in vocabulary
                             if u in self.data.wn_word2synset:
                                 #gets similar words
-                                syns = [s for ss in self.data.wn_word2synset[u] for s in self.data.wn_synset2word[ss] if s != u]
-                                #skip if no synonyms in vocabulary
-                                if len(syns) >0:
-                                    #select similar words based on negative sampling probs
-                                    syn_probs = np.array([self.data.negative_probs[i] for i in syns])
-                                    syn_norm = syn_probs/sum(syn_probs)
-                                    
-                                    wn_pos_ids = np.random.choice(syns, boundary*2, p = syn_norm)
-                                    neg_ids = self.data.get_negatives(pos, 4, boundary*2)
-        
-                                    wn_pos.append(wn_pos_ids)
-                                    negs.append(neg_ids)
-                           
-                                #sort context and neg sample words by wordnet similarity to target
-                                    sim = list(wn_pos_ids)
-                                    w2v_mismatch = []
-                                    not_sim = []
-                                    for j in v:
-                                        #skip padded cells
-                                        if j != 0 and j in self.data.wn_word2synset:
-                                            #mark as similar if u and j share any synset groups
-                                            if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[j]) < len(self.data.wn_word2synset[u]):
-                                                sim.append(j)
-                                            else:
-                                                w2v_mismatch.append(j)
-                                    for k in neg_ids:
-                                        #skip padded cells in tensors
-                                        if k != 0 and k in self.data.wn_word2synset:
-                                            #mark as similar if u and k share any synset groups
-                                            if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[k]) < len(self.data.wn_word2synset[u]):
-                                                sim.append(k)
-                                            else:
-                                                not_sim.append(k)
-                                    
-                                    sims.append(sim)
-                                    not_sims.append(not_sim)
-                                    mismatches.append(w2v_mismatch)
-                                else:
-                                    negs.append(self.data.get_negatives(pos, 4, boundary*2))
-                                    wn_pos.append([0]*boundary*2)
-                                    sims.append([])
-                                    not_sims.append([])
-                                    mismatches.append([])
+                                syns = self.data.wn_word2syns[u]
+                                #select similar words based on negative sampling probs
+                                syn_probs = np.array([self.data.negative_probs[i] for i in syns])
+                                syn_norm = syn_probs/sum(syn_probs)
+                                
+                                wn_pos_ids = np.random.choice(syns, boundary*2, p = syn_norm)
+                                neg_ids = self.data.get_negatives(pos, 4, boundary*2)
+    
+                                wn_pos.append(wn_pos_ids)
+                                negs.append(neg_ids)
+                       
+                            #sort context and neg sample words by wordnet similarity to target
+                                sim = list(wn_pos_ids)
+                                w2v_mismatch = []
+                                not_sim = []
+                                for j in v:
+                                    #skip padded cells
+                                    if j != 0 and j in self.data.wn_word2synset:
+                                        #mark as similar if u and j share any synset groups
+                                        if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[j]) < len(self.data.wn_word2synset[u]):
+                                            sim.append(j)
+                                        else:
+                                            w2v_mismatch.append(j)
+                                for k in neg_ids:
+                                    #skip padded cells in tensors
+                                    if k != 0 and k in self.data.wn_word2synset:
+                                        #mark as similar if u and k share any synset groups
+                                        if len(self.data.wn_word2synset[u]-self.data.wn_word2synset[k]) < len(self.data.wn_word2synset[u]):
+                                            sim.append(k)
+                                        else:
+                                            not_sim.append(k)
+                                
+                                sims.append(sim)
+                                not_sims.append(not_sim)
+                                mismatches.append(w2v_mismatch)
+                                
                             else:
                                 negs.append(self.data.get_negatives(pos, 4, boundary*2))
                                 wn_pos.append([0]*boundary*2)
