@@ -98,11 +98,11 @@ class DataReader:
                         
                         #add 1st level of hyponyms
                         if self.wn_depth > 0: 
-                            syns.extend([self.word2id[w.lower()] for h in s.hyponyms() for w in h.lemma_names() if w.lower() in self.word2id])
+                            syns.extend([self.word2id[w.lower()] for h in synset.hyponyms() for w in h.lemma_names() if w.lower() in self.word2id])
                         
                         #add 2nd level of hyponyms
                         if self.wn_depth > 1:
-                            syns.extend([self.word2id[w.lower()] for h in s.hyponyms() for hh in h.hyponyms() for w in hh.lemma_names if w.lower() in self.word2id])
+                            syns.extend([self.word2id[w.lower()] for h in synset.hyponyms() for hh in h.hyponyms() for w in hh.lemma_names() if w.lower() in self.word2id])
                         
                         self.wn_synset2id[s] = sid
                         self.wn_synset2word[sid] = set(syns)
