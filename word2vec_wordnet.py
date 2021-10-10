@@ -187,12 +187,13 @@ class DataReader:
 # -------------------------------------------------------------------------------------------------------------------------
         
 class Word2VecWordnetDataset:
-    def __init__(self, data, window_size, wn_negative_sample = False, wn_positive_sample = False):
+    def __init__(self, data, window_size, wn_negative_sample = False, wn_positive_sample = False, wn_num_pos = 4):
         self.data = data
         self.window_size = window_size
         self.input_file = open(data.input_file_name, encoding = 'utf-8')
         self.wn_negative_sample = wn_negative_sample
         self.wn_positive_sample = wn_positive_sample
+        self.wn_num_pos = wn_num_pos
 
     def __len__(self):
         return self.data.sentence_count
@@ -231,16 +232,19 @@ class Word2VecWordnetDataset:
                 #add wordnet to sample as target word or negative sample
                 else:
                      
-                    if self.wn_positive_sample: #TODO: randomize whether this happens for every word? How many new pos examples are added?
+                    if self.wn_positive_sample: 
                     #replace target word with wordnet similar words and add to positive examples
                         wn_pairs = []
                         for pos in pos_pairs:
                             u,v = pos
-                            syns = self.data.wn_word2syns[u]
-                            #subsample wordnet similar words before adding
-                            wn_pairs.extend([(s,v) for s in syns
-                                                 if np.random.rand() > self.data.subsample_probs[s]])
-                        pos_pairs.extend(wn_pairs)
+                            if u in self.data.wn_word2synset:
+                                syns = self.data.wn_word2syns[u]
+                                #subsample wordnet similar words before adding
+                                wn_pairs.extend([(s,v) for s in syns
+                                                     if np.random.rand() > self.data.subsample_probs[s]])
+                        #add at most wn_num_pos synonym replacements to dataset
+                        wn_pairs = np.array(wn_pairs, dtype = object)
+                        pos_pairs.extend(wn_pairs[np.random.choice(len(wn_pairs), min(self.wn_num_pos, len(wn_pairs)))])
         
                     if self.wn_negative_sample:
                     #include one wordnet similar word per positive context to provide positive wordnet similarity samples
@@ -601,7 +605,7 @@ class WordnetFineTuning(nn.Module):
 class Word2VecWordnetTrainer:
     def __init__(self, datareader = None, train_dir = None, input_file_name= None, model_dir = None, model_state_dict = None,
                  emb_dimension = 100, batch_size = 32, num_workers = 0, epochs = 3, initial_lr = 0.001, 
-                 window_size = 5, wn_negative_sample = False, wn_positive_sample = False, wn_depth = 0,
+                 window_size = 5, wn_negative_sample = False, wn_positive_sample = False, wn_depth = 0, wn_num_pos = 4,
                  mismatch_weight=1, w2v_loss_weight=1, wn_loss_weight=1, margin = 1,
                  wn_fine_tune = False, ft_margin_weight = 0.1, ft_num_negs = 4, ft_epochs = 15):
         
@@ -633,7 +637,7 @@ class Word2VecWordnetTrainer:
             self.model.load_state_dict(torch.load(model_state_dict, map_location = self.device))
         else:
             self.pretrained = False
-            dataset = Word2VecWordnetDataset(self.data, window_size, wn_negative_sample, wn_positive_sample)
+            dataset = Word2VecWordnetDataset(self.data, window_size, wn_negative_sample, wn_positive_sample, wn_num_pos)
             self.dataloader = DataLoader(dataset, batch_size = batch_size, shuffle = True, num_workers = num_workers,
                                          collate_fn = dataset.collate_fn)
             
@@ -744,13 +748,14 @@ if __name__ == '__main__':
     parser.add_argument('--model_state_dict', help = 'state dict for pre-trained w2v model', default = None, required = False)
     
     parser.add_argument('--batch_size', type = int, default = 1024, required = False)
+    parser.add_argument('--wn_depth', help = 'how many levels of hyponyms to include in a wn synset group, between 0 (synset members only) and 2', type = int, default = 0, required = False)
     parser.add_argument('--num_workers', help = 'if using cuda, how many cpu cores to use in data loader', type = int, default = 0, required = False)            
     parser.add_argument('--epochs',  help = 'number of full runs through data set', type = int, default = 3, required = False)
     parser.add_argument('--initial_lr', help = 'starting learning rate, to be updated by sparse_adam optimizer', type = float, default = 0.001, required = False)
     parser.add_argument('--window_size', help = 'training window size', type = int, default = 5, required = False)
     parser.add_argument('--wn_negative_sample', help = 'integrate wn knowledge in w2v loss function with additional contrastive loss', type = bool, default = False, required = False)
     parser.add_argument('--wn_positive_sample', help = 'integrate wn knowledge in w2v loss by extending with target word-synset member replacement', type = bool, default = False, required = False)
-    parser.add_argument('--wn_depth', help = 'how many levels of hyponyms to include in a wn synset group, between 0 (synset members only) and 2', type = int, default = 0, required = False)
+    parser.add_argument('--wn_num_pos', help = 'if wn_positive_sample = True: max number of synonym samples to add to batch', type = int, default = 4, required = False)
     parser.add_argument('--mismatch_weight', help = 'if wn_negative_sample = True: weight for wn similar words in w2v loss function, and w2v positive context words in wn loss function', type = float, default = 1.0, required = False)
     parser.add_argument('--w2v_loss_weight', help = 'if wn_negative_sample = True: weight for w2v loss function', type = float, default = 1.0, required = False)
     parser.add_argument('--wn_loss_weight', help = 'if wn_negative_sample = True: weight for wn loss function', type = float, default = 1.0, required = False)

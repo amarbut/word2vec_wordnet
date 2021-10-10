@@ -115,16 +115,22 @@ while line:
             pos_pairs = [(u,word_ids[max(i - boundary, 0):i + boundary]) for i, u in enumerate(word_ids) if np.random.rand() > w2v_wn.data.subsample_probs[u]]
             
             
-w2v_wn = Word2VecWordnetTrainer(datareader = "/home/anna/Documents/W2V_Data/moby_trials/data_reader.pkl",
+w2v_wn = Word2VecWordnetTrainer(#datareader = "/home/anna/Documents/W2V_Data/moby_trials/data_reader.pkl",
                                 #datareader = "/home/anna/Documents/W2V_Data/wn_negsample_datareader_19Sep21.pkl",
-                                #train_dir = "/home/anna/Documents/W2V_Data/", 
-                                #input_file_name = "moby_clean.txt", 
+                                train_dir = "/home/anna/Documents/W2V_Data/", 
+                                input_file_name = "moby_clean.txt", 
                                 model_dir = "/home/anna/Documents/W2V_Data/moby_trials",
                                 #model_state_dict = "/home/anna/Documents/W2V_Data/moby_trials/w2v_model.pth",
                                 #model_dir = "/home/anna/Documents/W2V_Data/wn_ft_trials", 
                                 #model_state_dict = "/home/anna/Documents/W2V_Data/wn_negsample_model_19Sep21.pth",
                                 wn_negative_sample = True,
-                                wn_fine_tune = True)
+                                wn_fine_tune = True,
+                                wn_depth = 2
+                                )
+
+start = datetime.datetime.now()
+w2v_wn.w2v_train()
+print(datetime.datetime.now()- start)
 
 all_sim = wn.numpy().tolist()
 all_not_sim = []
@@ -194,4 +200,6 @@ wn_neg_loss = torch.sum(0.5*(wn_neg_dist**2),1).unsqueeze(1)
 wn_mismatch_loss = mismatch_weight*(torch.sum(0.5*(wn_mismatch_dist**2),1).unsqueeze(1))
 
 #combine wn_pos_loss, wn_neg_loss, wn_mismatch
-wn_loss = wn_pos_loss + wn_neg_loss + wn_mismatch_loss                                
+wn_loss = wn_pos_loss + wn_neg_loss + wn_mismatch_loss    
+
+syns = [s for ss in w2v_wn.data.wn_word2synset[867] for s in w2v_wn.data.wn_synset2word[ss] if s != 867]                            
