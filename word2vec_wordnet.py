@@ -16,6 +16,8 @@ import os
 import numpy as np
 import pickle
 import json
+import nltk
+nltk.download('wordnet')
 from nltk.corpus import wordnet as wn
 
 class DataReader:

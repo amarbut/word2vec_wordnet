@@ -123,9 +123,10 @@ w2v_wn = Word2VecWordnetTrainer(#datareader = "/home/anna/Documents/W2V_Data/mob
                                 #model_state_dict = "/home/anna/Documents/W2V_Data/moby_trials/w2v_model.pth",
                                 #model_dir = "/home/anna/Documents/W2V_Data/wn_ft_trials", 
                                 #model_state_dict = "/home/anna/Documents/W2V_Data/wn_negsample_model_19Sep21.pth",
-                                wn_negative_sample = True,
-                                wn_fine_tune = True,
-                                wn_depth = 2
+                                #wn_negative_sample = True,
+                                #wn_fine_tune = True,
+                                wn_depth = 2,
+                                wn_positive_sample = True
                                 )
 
 start = datetime.datetime.now()
