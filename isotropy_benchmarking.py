@@ -41,18 +41,19 @@ def load_embeddings(embedding_file):
     emb = np.genfromtxt(embedding_file)
     return emb
 
-def compute_isotropy_measures(embedding_file, num_sample = 1000):
-    model_name = embedding_file.split("/")[-2]
+def compute_isotropy_measures(embedding_file, dir_name, num_sample = 1000):
     embeddings = load_embeddings(embedding_file)
     avg_cos_dist = avg_cos(embeddings)
     pc_iso = pc_isotropy(embeddings)
+    model_name = dir_name.split("/")[-2]
     print(model_name+"\t"+str(avg_cos_dist)+"\t"+str(pc_iso)+"\n")
     
 
 #--------------------------------------------------------------
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--embedding_file', help = 'tab delimited file with word embeddings', default = None,required = False)
+    parser.add_argument('--embedding_file', help = 'tab delimited file with word embeddings', default = None,required = True)
+    parser.add_argument('--dir_name', help = 'name of directory holding embeddings, used to extract model name', default = None, required = True)
     parser.add_argument('--num_sample',  help = 'number of words to sample for avg cosine similarity', default = 1000, required = False)
     args = vars(parser.parse_args())
     compute_isotropy_measures(**args)
