@@ -8,6 +8,7 @@ Created on Mon Jan 17 12:07:34 2022
 from sklearn.decomposition import PCA
 import numpy as np
 from math import exp
+import argparse
 
 
 def pc_isotropy(embeddings):
@@ -20,7 +21,7 @@ def pc_isotropy(embeddings):
     min_sum = 0
     for emb in embeddings:
         max_sum += exp(np.dot(max_pc, emb))
-        min_sum == exp(np.dot(min_pc, emb))
+        min_sum += exp(np.dot(min_pc, emb))
         
     return min_sum/max_sum
         
@@ -40,6 +41,22 @@ def load_embeddings(embedding_file):
     emb = np.genfromtxt(embedding_file)
     return emb
 
+def compute_isotropy_measures(embedding_file, num_sample = 1000):
+    model_name = embedding_file.split("/")[-2]
+    embeddings = load_embeddings(embedding_file)
+    avg_cos_dist = avg_cos(embeddings)
+    pc_iso = pc_isotropy(embeddings)
+    print(model_name+"\t"+str(avg_cos_dist)+"\t"+str(pc_iso)+"\n")
+    
 
+#--------------------------------------------------------------
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--embedding_file', help = 'tab delimited file with word embeddings', default = None,required = False)
+    parser.add_argument('--num_sample',  help = 'number of words to sample for avg cosine similarity', default = 1000, required = False)
+    args = vars(parser.parse_args())
+    compute_isotropy_measures(**args)
+    
+    
         
                 
