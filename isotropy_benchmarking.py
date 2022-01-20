@@ -34,9 +34,9 @@ def pc_isotropy(embeddings):
         sum_75 += exp(np.dot(pc_75, emb))
         
     pcr_100 = min_sum/max_sum
-    pcr_75 = min_sum/sum_75
-    pcr_50 = min_sum/sum_50
-    pcr_25 = min_sum/sum_25
+    pcr_75 = sum_75/max_sum
+    pcr_50 = sum_50/max_sum
+    pcr_25 = sum_25/max_sum
         
     return [pcr_100, pcr_75, pcr_50, pcr_25]
         
