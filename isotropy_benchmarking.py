@@ -15,15 +15,30 @@ def pc_isotropy(embeddings):
     #per Mu 2017, take ratio of dot product of max/min principal component with all words in vocab as a measure of isotropy
     pc = PCA()
     pc.fit(embeddings)
+    num = len(embeddings[0])
     max_pc = pc.components_[0]
-    min_pc = pc.components_[-1]
+    min_pc = pc.components_[num-1]
+    pc_25 = pc.components_[round(num*0.25)-1]
+    pc_50 = pc.components_[round(num*0.5)-1]
+    pc_75 = pc.components_[round(num*0.75)-1]
     max_sum = 0
     min_sum = 0
+    sum_25 = 0
+    sum_50 = 0
+    sum_75 = 0
     for emb in embeddings:
         max_sum += exp(np.dot(max_pc, emb))
         min_sum += exp(np.dot(min_pc, emb))
+        sum_25 += exp(np.dot(pc_25, emb))
+        sum_50 += exp(np.dot(pc_50, emb))
+        sum_75 += exp(np.dot(pc_75, emb))
         
-    return min_sum/max_sum
+    pcr_100 = min_sum/max_sum
+    pcr_75 = min_sum/sum_75
+    pcr_50 = min_sum/sum_50
+    pcr_25 = min_sum/sum_25
+        
+    return [pcr_100, pcr_75, pcr_50, pcr_25]
         
     
 def avg_cos(embeddings, num_sample = 1000):
@@ -33,7 +48,7 @@ def avg_cos(embeddings, num_sample = 1000):
     cos_dist = []
     for i in range(num_sample):
         for j in range(i,num_sample):
-            cos_dist.append(np.dot(samples[i],samples[j]))
+            cos_dist.append(np.dot(samples[i],samples[j])/((np.linalg.norm(samples[i])+0.00001)*(np.linalg.norm(samples[j])+0.00001)))
             
     return np.mean(cos_dist)
 
@@ -44,9 +59,9 @@ def load_embeddings(embedding_file):
 def compute_isotropy_measures(embedding_file, dir_name, num_sample = 1000):
     embeddings = load_embeddings(embedding_file)
     avg_cos_dist = avg_cos(embeddings)
-    pc_iso = pc_isotropy(embeddings)
+    pc_100, pc_75, pc_50, pc_25 = pc_isotropy(embeddings)
     model_name = dir_name.split("/")[-2]
-    print(model_name+"\t"+str(avg_cos_dist)+"\t"+str(pc_iso)+"\n")
+    print("\t".join([model_name, str(avg_cos_dist), str(pc_100), str(pc_75), str(pc_50), str(pc_25)])+"\n")
     
 
 #--------------------------------------------------------------
