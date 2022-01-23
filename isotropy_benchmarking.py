@@ -26,9 +26,9 @@ def pc_isotropy(embeddings):
     sums.sort()
     max_sum = sums[-1]
     min_sum = sums[0]
-    sum_75 = sums[round(num*0.75)-1]
+    sum_75 = sums[round(num*0.25)-1]
     sum_50 = sums[round(num*0.5)-1]
-    sum_25 = sums[round(num*0.25)-1]
+    sum_25 = sums[round(num*0.75)-1]
     
         
     pcr_100 = min_sum/max_sum
