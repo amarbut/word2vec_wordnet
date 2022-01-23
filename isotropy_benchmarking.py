@@ -20,7 +20,7 @@ def pc_isotropy(embeddings):
     for c in pc.components_:
         c_sum = 0
         for emb in embeddings:
-            c_sum += exp(np.dot(c,emb)/((np.lingalg.norm(c)+1e-5)*(np.linalg.norm(emb)+1e-5)))
+            c_sum += exp(np.dot(c,emb)/((np.linalg.norm(c)+1e-5)*(np.linalg.norm(emb)+1e-5)))
         sums.append(c_sum)
     
     sums.sort()
