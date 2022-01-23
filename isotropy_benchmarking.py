@@ -16,22 +16,20 @@ def pc_isotropy(embeddings):
     pc = PCA()
     pc.fit(embeddings)
     num = len(embeddings[0])
-    max_pc = pc.components_[0]
-    min_pc = pc.components_[num-1]
-    pc_25 = pc.components_[round(num*0.25)-1]
-    pc_50 = pc.components_[round(num*0.5)-1]
-    pc_75 = pc.components_[round(num*0.75)-1]
-    max_sum = 0
-    min_sum = 0
-    sum_25 = 0
-    sum_50 = 0
-    sum_75 = 0
-    for emb in embeddings:
-        max_sum += exp(np.dot(max_pc, emb))
-        min_sum += exp(np.dot(min_pc, emb))
-        sum_25 += exp(np.dot(pc_25, emb))
-        sum_50 += exp(np.dot(pc_50, emb))
-        sum_75 += exp(np.dot(pc_75, emb))
+    sums = []
+    for c in pc.components_:
+        c_sum = 0
+        for emb in embeddings:
+            c_sum += exp(np.dot(c,emb))
+        sums.append(c_sum)
+    
+    sums.sort()
+    max_sum = sums[-1]
+    min_sum = sums[0]
+    sum_75 = sums[round(num*0.75)-1]
+    sum_50 = sums[round(num*0.5)-1]
+    sum_25 = sums[round(num*0.25)-1]
+    
         
     pcr_100 = min_sum/max_sum
     pcr_75 = sum_75/max_sum
